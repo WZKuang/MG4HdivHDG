@@ -24,6 +24,16 @@ def EdgePatchBlocks(mesh, fes):
         blocks.append(vdofs)
     return blocks
 
+def FacetPatchBlocks(mesh, fes):
+    blocks = []
+    freedofs = fes.FreeDofs(True)
+    for f in mesh.faces:
+        fdofs = set()
+        for el in mesh[f].elements:
+            fdofs |= set(d for d in fes.GetDofNrs(el) if freedofs[d])
+        blocks.append(fdofs)
+    return blocks
+
 class SymmetricGS(BaseMatrix):
     def __init__ (self, smoother):
         super(SymmetricGS, self).__init__()
@@ -57,8 +67,8 @@ class MultiGrid(BaseMatrix):
         self.dim = dim
         self.nactive = [nc]
         self.nlevels = 0
-        #self.invcoarseproblem = mat.Inverse(coarsedofs, inverse="sparsecholesky")
-        self.invcoarseproblem = mat.Inverse(coarsedofs, inverse="pardiso")
+        self.invcoarseproblem = mat.Inverse(coarsedofs, inverse="sparsecholesky")
+        # self.invcoarseproblem = mat.Inverse(coarsedofs, inverse="pardiso")
 
     def Update(self, mat, pp):
         self.mats.append (mat)
