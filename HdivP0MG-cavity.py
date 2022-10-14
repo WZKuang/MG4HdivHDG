@@ -1,6 +1,7 @@
 # Stokes, Hdiv-P0 MG preconditioned CG solver
 # One time Lagrangian Augmented Uzawa iteration
 # condensed mixed Hdiv-P0 equivalent to CR scheme
+# Test case - lid-driven cavity problem
 from distutils.log import error
 from ngsolve import *
 from netgen.geom2d import SplineGeometry, unit_square
@@ -24,50 +25,11 @@ epsilon = 1e-6
 
 if dim == 2:
     mesh = Mesh(unit_square.GenerateMesh(maxh=1/iniN))
-    # exact solution
-    u_exact1 = x ** 2 * (x - 1) ** 2 * 2 * y * (1 - y) * (2 * y - 1)
-    u_exact2 = y ** 2 * (y - 1) ** 2 * 2 * x * (x - 1) * (2 * x - 1)
-    u_exact = CF((u_exact1, u_exact2))
-
-    L_exactXX = (2 * x * (x - 1) ** 2 * 2 * y * (1 - y) * (2 * y - 1)
-                            + x ** 2 * 2 * (x - 1) * 2 * y * (1 - y) * (2 * y - 1))
-    L_exactXY = (x ** 2 * (x - 1) ** 2 * 2 * (1 - y) * (2 * y - 1)
-                            - x ** 2 * (x - 1) ** 2 * 2 * y * (2 * y - 1)
-                            + 2 * x ** 2 * (x - 1) ** 2 * 2 * y * (1 - y))
-    L_exactYX = (y ** 2 * (y - 1) ** 2 * 2 * (x - 1) * (2 * x - 1)
-                            + y ** 2 * (y - 1) ** 2 * 2 * x * (2 * x - 1)
-                            + 2 * y ** 2 * (y - 1) ** 2 * 2 * x * (x - 1))
-    L_exactYY = (2 * y * (y - 1) ** 2 * 2 * x * (x - 1) * (2 * x - 1)
-                            + y ** 2 * 2 * (y - 1) * 2 * x * (x - 1) * (2 * x - 1))
-    L_exact = CF((L_exactXX, L_exactXY, L_exactYX, L_exactYY), dims=(2, 2))
-
-    p_exact = x * (1 - x) * (1 - y) - 1 / 12
+    # top side dirichlet bd
+    utop = CoefficientFunction((4*x*(1-x),0))
 elif dim == 3:
     mesh = Mesh(unit_cube.GenerateMesh(maxh=1/iniN))
-    # exact solution
-    u_exact1 = x ** 2 * (x - 1) ** 2 * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-    u_exact2 = y ** 2 * (y - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-    u_exact3 = -2 * z ** 2 * (z - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-    u_exact = CF((u_exact1, u_exact2, u_exact3))
-
-    L_exactXX = (2 * x * (x - 1) ** 2 * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                            + x ** 2 * 2 * (x - 1) * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-    L_exactXY = (x ** 2 * (x - 1) ** 2 * (2 - 12 * y + 12 * y ** 2) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-    L_exactXZ = (x ** 2 * (x - 1) ** 2 * (2 - 12 * z + 12 * z ** 2) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-    L_exactYX = (y ** 2 * (y - 1) ** 2 * (2 - 12 * x + 12 * x ** 2) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-    L_exactYY = (2 * y * (y - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                            + y ** 2 * 2 * (y - 1) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-    L_exactYZ = (y ** 2 * (y - 1) ** 2 * (2 - 12 * z + 12 * z ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-    L_exactZX = (-2 * z ** 2 * (z - 1) ** 2 * (2 - 12 * x + 12 * x ** 2) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-    L_exactZY = (-2 * z ** 2 * (z - 1) ** 2 * (2 - 12 * y + 12 * y ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-    L_exactZZ = (
-                -2 * 2 * z * (z - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-                - 2 * z ** 2 * 2 * (z - 1) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-    L_exact = CF((L_exactXX, L_exactXY, L_exactXZ,
-                    L_exactYX, L_exactYY, L_exactYZ,
-                    L_exactZX, L_exactZY, L_exactZZ), dims=(3, 3))
-
-    p_exact = x * (1 - x) * (1 - y) * (1 - z) - 1 / 24
+    utop = CoefficientFunction((16*x*(1-x)*y*(1-y),0,0))
 else:
     error('WRONG DIMENSION!'); exit()
 
@@ -96,34 +58,7 @@ a += 1/epsilon * div(u) * div(v) * dx # one-time Augmented Lagrangian Uzawa meth
 a += (InnerProduct(L, G) + c_low*u*v) * dx
 a += (-G*n * ((u*n)*n + tang(uhat)) + L*n * ((v*n)*n + tang(vhat))) * dx(element_boundary=True)
 
-if dim == 2:
-    f = LinearForm(fes)
-    f += (-(4 * y * (1 - y) * (2 * y - 1) * ((1 - 2 * x) ** 2 - 2 * x * (1 - x))
-                    + 12 * x ** 2 * (1 - x) ** 2 * (1 - 2 * y))
-            + (1 - 2 * x) * (1 - y)) * v[0] * dx
-    f += (-(4 * x * (1 - x) * (1 - 2 * x) * ((1 - 2 * y) ** 2 - 2 * y * (1 - y))
-                    + 12 * y ** 2 * (1 - y) ** 2 * (2 * x - 1))
-            - x * (1 - x)) * v[1] * dx
-    f += c_low * u_exact * v * dx
-elif dim == 3:
-    f = LinearForm(fes)
-    f += (-((2 - 12 * x + 12 * x ** 2) * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                        + (x ** 2 - 2 * x ** 3 + x ** 4) * (-12 + 24 * y) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                        + (x ** 2 - 2 * x ** 3 + x ** 4) * (-12 + 24 * z) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-            + (1 - 2 * x) * (1 - y) * (1 - z)
-            ) * v[0] * dx
-    f += (-((2 - 12 * y + 12 * y ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                    + (y ** 2 - 2 * y ** 3 + y ** 4) * (-12 + 24 * x) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                    + (y ** 2 - 2 * y ** 3 + y ** 4) * (-12 + 24 * z) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-            - x * (1 - x) * (1 - z)
-            ) * v[1] * dx
-    f += (2 * (
-                (2 - 12 * z + 12 * z ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-                + (z ** 2 - 2 * z ** 3 + z ** 4) * (-12 + 24 * x) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-                + (z ** 2 - 2 * z ** 3 + z ** 4) * (-12 + 24 * y) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-            - x * (1 - x) * (1 - y)
-            ) * v[2] * dx
-    f += c_low * u_exact * v * dx
+f = LinearForm(fes)
 
 # ========= Crouzeix-Raviart scheme =========
 V_cr = FESpace('nonconforming', mesh, dirichlet='.*')
@@ -161,7 +96,7 @@ prolVcr = FacetProlongationTrig2(mesh, et) if dim==2 else FacetProlongationTet2(
 a_cr.Assemble()
 MG_cr = MultiGrid(a_cr.mat, prolVcr, nc=V_cr.ndof,
                     coarsedofs=fes_cr.FreeDofs(), w1=0.8,
-                    nsmooth=nSmooth, sm="gs", var=True,
+                    nsmooth=4, sm="gs", var=True,
                     he=True, dim=mesh.dim, wcycle=False)
 
 # L2 projection from fes_cr to fes
@@ -217,7 +152,8 @@ def SolveBVP_CR(level, drawResult=False):
     t1 = timeit.time()
 
     # dirichlet BC
-    # homogeneous Dirichlet assumed
+    uhath.Set(utop, definedon=mesh.Boundaries("top"))
+    f.vec.data = -a.mat * gfu.vec
     f.vec.data += a.harmonic_extension_trans * f.vec
     # gfu.vec.data += E @ inv_cr @ ET * f.vec
     inv_fes = CGSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=30)
@@ -233,35 +169,26 @@ def SolveBVP_CR(level, drawResult=False):
     print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
     print(f"==> IT: {it}, N_smooth: {nSmooth}, COND: {max(lams)/min(lams):.2E}")
     if drawResult:
-        Draw(uh, mesh)
-        # Draw(uh_cr, mesh)
+        Draw(uh, mesh, 'sol')
+        input('continue')
+
 
 drawResult = False
+if drawResult:  import netgen.gui
 SolveBVP = SolveBVP_CR
-def ecrCheck(level, meshRate=2, prev_uErr=0, prev_LErr=0):
+def ecrCheck(level):
     print(f'LEVEL: {level}, ALL DOFS: {fes.ndof}, GLOBAL DOFS: {W.ndof + M.ndof}')
-    L2_uErr = sqrt(Integrate((uh - u_exact) * (uh - u_exact), mesh))
-    L2_LErr = sqrt(Integrate(InnerProduct((Lh - L_exact), (Lh - L_exact)), mesh))
     L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
-    if level > 0:
-        u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
-        L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
-        print(f"uh L2-error: {L2_uErr:.3E}, uh conv rate: {u_rate:.2E}")
-        print(f"Lh L2-error: {L2_LErr:.3E}, Lh conv rate: {L_rate:.2E}")
-    else:
-        print(f"uh L2-error: {L2_uErr:.3E}")
-        print(f"Lh L2-error: {L2_LErr:.3E}")
     print(f'uh divErr: {L2_divErr:.1E}')
     print('==============================')
-    return (L2_uErr, L2_LErr)
 
 print(f'===== DIM: {mesh.dim}, c_low: {c_low}, eps: {epsilon} =====')
 SolveBVP(0, drawResult)
-prev_uErr, prev_LErr = ecrCheck(0)
+ecrCheck(0)
 level = 1
 while True:
     with TaskManager():
-        # uniform refinement used, meshRate=2 in ecrCheck
+        # uniform refinement
         mesh.ngmesh.Refine()
         # exit if total global dofs exceed a tol
         M.Update(); W.Update()
@@ -269,7 +196,7 @@ while True:
             print(W.ndof + M.ndof)
             break
         SolveBVP(level, drawResult)
-        prev_uErr, prev_LErr = ecrCheck(level, prev_uErr=prev_uErr, prev_LErr=prev_LErr)
+        ecrCheck(level)
         level += 1
 
-        
+       
