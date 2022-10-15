@@ -114,7 +114,7 @@ prolVcr = FacetProlongationTrig2(mesh, et) if dim==2 else FacetProlongationTet2(
 a_cr.Assemble()
 MG_cr = MultiGrid(a_cr.mat, prolVcr, nc=V_cr.ndof,
                     coarsedofs=fes_cr.FreeDofs(), w1=0.8,
-                    nsmooth=4, sm="gs", var=True,
+                    nsmooth=nSmooth, sm="gs", var=True,
                     he=True, dim=mesh.dim, wcycle=False)
 
 # L2 projection from fes_cr to fes
