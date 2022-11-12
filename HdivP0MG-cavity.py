@@ -110,67 +110,70 @@ fesMass += (u*n) * (v*n) * dx(element_boundary=True)
 fesMass += tang(uhat) * tang(vhat) * dx(element_boundary=True)
 
 def SolveBVP_CR(level, drawResult=False):
-    t0 = timeit.time()
-    fes.Update(); fes_cr.Update()
-    gfu.Update()
-    a.Assemble(); a_cr.Assemble()
-    f.Assemble()
-    mixmass_cr.Assemble(); fesMass.Assemble()
+    with TaskManager():
+        t0 = timeit.time()
+        fes.Update(); fes_cr.Update()
+        gfu.Update()
+        a.Assemble(); a_cr.Assemble()
+        f.Assemble()
+        mixmass_cr.Assemble(); fesMass.Assemble()
 
-    # global dofs mass mat => fesMass is diagonal
-    # but only when dim = 2 !!!!!
-    if dim == 2:
-        fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
-    elif dim == 3:
-        fesM_inv = fesMass.mat.CreateBlockSmoother(FacetPatchBlocks(mesh, fes))
-    E = fesM_inv @ mixmass_cr.mat # E: fes_cr => fes
-    ET = mixmass_cr.mat.T @ fesM_inv
+        # global dofs mass mat => fesMass is diagonal
+        # but only when dim = 2 !!!!!
+        if dim == 2:
+            fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
+        elif dim == 3:
+            fesM_inv = fesMass.mat.CreateBlockSmoother(FacetPatchBlocks(mesh, fes))
+        E = fesM_inv @ mixmass_cr.mat # E: fes_cr => fes
+        ET = mixmass_cr.mat.T @ fesM_inv
 
-    # CR MG update
-    if level > 0:
-        et.Update()
-        pp = [fes_cr.FreeDofs()]
-        pp.append(V_cr.ndof)
-        pdofs = BitArray(fes_cr.ndof)
-        pdofs[:] = 0
-        inner = prolVcr.GetInnerDofs(level)
-        for j in range(mesh.dim):
-            pdofs[j * V_cr.ndof:(j + 1) * V_cr.ndof] = inner
-        # he_prol
-        pp.append(a_cr.mat.Inverse(pdofs, inverse="sparsecholesky"))
-        # bk smoother
-        # TODO: WHY THIS IS WRONG???!!!
-        # bjac = et.CreateSmoother(a_cr, {"blocktype": "vertexpatch"})
-        # pp.append(bjac)
-        pp.append(VertexPatchBlocks(mesh, fes_cr))
-        MG_cr.Update(a_cr.mat, pp)
-    
-    # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='sparsecholesky')
-    inv_cr = MG_cr
-
-    pre = E @ inv_cr @ ET
-    t1 = timeit.time()
-
-    # dirichlet BC
-    uhath.Set(utop, definedon=mesh.Boundaries("top"))
-    f.vec.data = -a.mat * gfu.vec
-    f.vec.data += a.harmonic_extension_trans * f.vec
-    # gfu.vec.data += E @ inv_cr @ ET * f.vec
-    inv_fes = CGSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=30)
-    gfu.vec.data += inv_fes * f.vec
-    gfu.vec.data += a.harmonic_extension * gfu.vec
-    gfu.vec.data += a.inner_solve * f.vec
+        # CR MG update
+        if level > 0:
+            et.Update()
+            pp = [fes_cr.FreeDofs()]
+            pp.append(V_cr.ndof)
+            pdofs = BitArray(fes_cr.ndof)
+            pdofs[:] = 0
+            inner = prolVcr.GetInnerDofs(level)
+            for j in range(mesh.dim):
+                pdofs[j * V_cr.ndof:(j + 1) * V_cr.ndof] = inner
+            # he_prol
+            pp.append(a_cr.mat.Inverse(pdofs, inverse="sparsecholesky"))
+            # bk smoother
+            # TODO: WHY THIS IS WRONG???!!!
+            # bjac = et.CreateSmoother(a_cr, {"blocktype": "vertexpatch"})
+            # pp.append(bjac)
+            pp.append(VertexPatchBlocks(mesh, fes_cr))
+            MG_cr.Update(a_cr.mat, pp)
         
-    it = inv_fes.iterations
-    # gfu_cr.vec.data += a_cr.mat.Inverse(fes_cr.FreeDofs(True), inverse='umfpack') * f_cr.vec
-    t2 = timeit.time()
+        # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='sparsecholesky')
+        inv_cr = MG_cr
 
-    lams = EigenValues_Preconditioner(mat=a_cr.mat, pre=MG_cr)
-    print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
-    print(f"==> IT: {it}, N_smooth: {nSmooth}, COND: {max(lams)/min(lams):.2E}")
-    if drawResult:
-        Draw(uh, mesh, 'sol')
-        input('continue')
+        pre = E @ inv_cr @ ET
+        t1 = timeit.time()
+
+        # dirichlet BC
+        uhath.Set(utop, definedon=mesh.Boundaries("top"))
+        f.vec.data = -a.mat * gfu.vec
+        f.vec.data += a.harmonic_extension_trans * f.vec
+        # gfu.vec.data += E @ inv_cr @ ET * f.vec
+        inv_fes = CGSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=30)
+        gfu.vec.data += inv_fes * f.vec
+        gfu.vec.data += a.harmonic_extension * gfu.vec
+        gfu.vec.data += a.inner_solve * f.vec
+            
+        it = inv_fes.iterations
+        # gfu_cr.vec.data += a_cr.mat.Inverse(fes_cr.FreeDofs(True), inverse='umfpack') * f_cr.vec
+        t2 = timeit.time()
+
+        lams = EigenValues_Preconditioner(mat=a_cr.mat, pre=MG_cr)
+        print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
+        print(f"==> IT: {it}, N_smooth: {nSmooth}, COND: {max(lams)/min(lams):.2E}")
+        if drawResult:
+            Draw(uh, mesh, 'sol')
+            input('continue')
+
+
 
 
 drawResult = False
@@ -187,16 +190,15 @@ SolveBVP(0, drawResult)
 ecrCheck(0)
 level = 1
 while True:
-    with TaskManager():
-        # uniform refinement
-        mesh.ngmesh.Refine()
-        # exit if total global dofs exceed a tol
-        M.Update(); W.Update()
-        if (W.ndof + M.ndof > maxdofs):
-            print(W.ndof + M.ndof)
-            break
-        SolveBVP(level, drawResult)
-        ecrCheck(level)
-        level += 1
+    # uniform refinement
+    mesh.ngmesh.Refine()
+    # exit if total global dofs exceed a tol
+    M.Update(); W.Update()
+    if (W.ndof + M.ndof > maxdofs):
+        print(W.ndof + M.ndof)
+        break
+    SolveBVP(level, drawResult)
+    ecrCheck(level)
+    level += 1
 
        

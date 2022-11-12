@@ -1,12 +1,12 @@
-# Stokes, Hdiv-P0 MG preconditioned CG solver
+# Stokes, hp-MG preconditioned CG solver
 # One time Lagrangian Augmented Uzawa iteration
-# condensed mixed Hdiv-P0 equivalent to CR scheme
 from distutils.log import error
 from ngsolve import *
-from netgen.geom2d import SplineGeometry, unit_square
+from ngsolve.meshes import *
+from netgen.geom2d import SplineGeometry
 import time as timeit
 from netgen.csg import *
-from ngsolve.krylovspace import CGSolver, CG
+from ngsolve.krylovspace import CGSolver
 from prol import *
 from mymg import *
 from ngsolve.la import EigenValues_Preconditioner
@@ -19,11 +19,14 @@ c_low = int(sys.argv[2])
 nSmooth = int(sys.argv[3])
 
 iniN = 4
-maxdofs = 1e6
+maxdofs = 1e5
 epsilon = 1e-6
+order = 3
+drawResult = False
 
+# ========== START of MESH and EXACT SOLUTION ==========
 if dim == 2:
-    mesh = Mesh(unit_square.GenerateMesh(maxh=1/iniN))
+    mesh = MakeStructured2DMesh(quads=False, nx=iniN)
     # exact solution
     u_exact1 = x ** 2 * (x - 1) ** 2 * 2 * y * (1 - y) * (2 * y - 1)
     u_exact2 = y ** 2 * (y - 1) ** 2 * 2 * x * (x - 1) * (2 * x - 1)
@@ -71,31 +74,100 @@ elif dim == 3:
 else:
     error('WRONG DIMENSION!'); exit()
 
+# ========== END of MESH and EXACT SOLUTION ==========
 
-# ========= Hdiv-P0 scheme =========
-V = MatrixValued(L2(mesh, order=0), mesh.dim, False)
-if dim == 2:
-    W = HDiv(mesh, order=0, RT=True, dirichlet=".*")
-elif dim == 3:
-    W = HDiv(mesh, order=0, dirichlet=".*") # inconsistent option
-M = TangentialFacetFESpace(mesh, order=0, dirichlet=".*")
-fes = V * W * M 
-(L, u, uhat), (G, v, vhat) = fes.TnT()
-gfu = GridFunction(fes)
-Lh, uh, uhath = gfu.components
 
-print(f'V ndof:{V.ndof}, W ndof:{W.ndof}, M ndof:{M.ndof}')
+
+
+
+
+
+
+
 
 n = specialcf.normal(mesh.dim)
 h = specialcf.mesh_size
 def tang(v):
         return v - (v*n)*n
-# bilinear form and rhs linear form
-a = BilinearForm(fes, symmetric=False, condense=True)
-a += 1/epsilon * div(u) * div(v) * dx # one-time Augmented Lagrangian Uzawa method
-a += (InnerProduct(L, G) + c_low*u*v) * dx
-a += (-G*n * ((u*n)*n + tang(uhat)) + L*n * ((v*n)*n + tang(vhat))) * dx(element_boundary=True)
+# ========== START of CR MG SETUP for P-MG ==========
+# # ========= Crouzeix-Raviart scheme =========
+W0 = HDiv(mesh, order=0, RT=True, dirichlet=".*")
+V_cr = FESpace('nonconforming', mesh, dirichlet='.*')
+if mesh.dim == 2:
+    fes_cr = V_cr * V_cr
+    (ux_cr, uy_cr), (vx_cr, vy_cr) = fes_cr.TnT()
 
+    u_cr = CF((ux_cr, uy_cr))
+    v_cr = CF((vx_cr, vy_cr))
+    GradU_cr = CF((grad(ux_cr), grad(uy_cr)))
+    GradV_cr = CF((grad(vx_cr), grad(vy_cr)))
+    divU_cr = grad(ux_cr)[0] + grad(uy_cr)[1]
+    divV_cr = grad(vx_cr)[0] + grad(vy_cr)[1]
+elif mesh.dim == 3:
+    fes_cr = V_cr * V_cr * V_cr
+    (ux_cr, uy_cr, uz_cr), (vx_cr, vy_cr, vz_cr) = fes_cr.TnT()
+
+    u_cr = CF((ux_cr, uy_cr, uz_cr))
+    v_cr = CF((vx_cr, vy_cr, vz_cr))
+    GradU_cr = CF((grad(ux_cr), grad(uy_cr), grad(uz_cr)))
+    GradV_cr = CF((grad(vx_cr), grad(vy_cr), grad(vz_cr)))
+    divU_cr = grad(ux_cr)[0] + grad(uy_cr)[1] + grad(uz_cr)[2]
+    divV_cr = grad(vx_cr)[0] + grad(vy_cr)[1] + grad(vz_cr)[2]
+# bilinear form, equivalent to condensed Hdiv-P0
+a_cr = BilinearForm(fes_cr)
+a_cr += (InnerProduct(GradU_cr, GradV_cr) 
+        + c_low * Interpolate(u_cr, W0) * Interpolate(v_cr, W0)
+        + 1/epsilon * divU_cr * divV_cr) * dx
+# # ========== CR MG initialization
+et = meshTopology(mesh, mesh.dim)
+et.Update()
+prolVcr = FacetProlongationTrig2(mesh, et) if dim==2 else FacetProlongationTet2(mesh, et)
+with TaskManager():
+    a_cr.Assemble()
+    MG_cr = MultiGrid(a_cr.mat, prolVcr, nc=V_cr.ndof,
+                        coarsedofs=fes_cr.FreeDofs(), w1=0.8,
+                        nsmooth=nSmooth, sm="gs", var=True,
+                        he=True, dim=mesh.dim, wcycle=False)
+
+# ========== END of CR MG SETUP for P-MG ==========
+
+
+
+
+
+
+
+
+
+
+
+# ========= START of HIGHER ORDER Hdiv-HDG SCHEME TO BE SOLVED ==========
+# ========= mixed-HidvHDG scheme =========
+V = MatrixValued(L2(mesh, order=order), mesh.dim, False)
+if mesh.dim == 2:
+    W = HDiv(mesh, order=order, RT=True, dirichlet=".*")
+elif mesh.dim == 3:
+    W = HDiv(mesh, order=order, dirichlet=".*") # inconsistent option in NGSolve
+M = TangentialFacetFESpace(mesh, order=order, dirichlet=".*")
+
+fes = V * W * M 
+(L, u,uhat),  (G, v,vhat) = fes.TnT()
+
+gfu = GridFunction (fes)
+Lh, uh, uhath = gfu.components
+
+# gradient by row
+gradv, gradu = Grad(v), Grad(u)
+
+# bilinear form of SIP-HdivHDG
+a = BilinearForm(fes, symmetric=False, condense=True)
+# volume term
+a += (1/epsilon * div(u) * div(v)) * dx
+a += (InnerProduct(L, G) + c_low * u * v
+      -InnerProduct(gradu, G) + InnerProduct(L, gradv)) * dx
+a += (tang(u-uhat) * tang(G*n) - tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
+
+# linear form 
 if dim == 2:
     f = LinearForm(fes)
     f += (-(4 * y * (1 - y) * (2 * y - 1) * ((1 - 2 * x) ** 2 - 2 * x * (1 - x))
@@ -125,74 +197,41 @@ elif dim == 3:
             ) * v[2] * dx
     f += c_low * u_exact * v * dx
 
-# ========= Crouzeix-Raviart scheme =========
-V_cr = FESpace('nonconforming', mesh, dirichlet='.*')
-if dim == 2:
-    fes_cr = V_cr * V_cr
-    (ux_cr, uy_cr), (vx_cr, vy_cr) = fes_cr.TnT()
 
-    u_cr = CF((ux_cr, uy_cr))
-    v_cr = CF((vx_cr, vy_cr))
-    GradU_cr = CF((grad(ux_cr), grad(uy_cr)))
-    GradV_cr = CF((grad(vx_cr), grad(vy_cr)))
-    divU_cr = grad(ux_cr)[0] + grad(uy_cr)[1]
-    divV_cr = grad(vx_cr)[0] + grad(vy_cr)[1]
-elif dim == 3:
-    fes_cr = V_cr * V_cr * V_cr
-    (ux_cr, uy_cr, uz_cr), (vx_cr, vy_cr, vz_cr) = fes_cr.TnT()
-
-    u_cr = CF((ux_cr, uy_cr, uz_cr))
-    v_cr = CF((vx_cr, vy_cr, vz_cr))
-    GradU_cr = CF((grad(ux_cr), grad(uy_cr), grad(uz_cr)))
-    GradV_cr = CF((grad(vx_cr), grad(vy_cr), grad(vz_cr)))
-    divU_cr = grad(ux_cr)[0] + grad(uy_cr)[1] + grad(uz_cr)[2]
-    divV_cr = grad(vx_cr)[0] + grad(vy_cr)[1] + grad(vz_cr)[2]
-# bilinear form, equivalent to condensed Hdiv-P0
-a_cr = BilinearForm(fes_cr)
-a_cr += (InnerProduct(GradU_cr, GradV_cr) 
-         + c_low * Interpolate(u_cr, W) * Interpolate(v_cr, W)
-        # + c_low * u_cr * v_cr
-        + 1/epsilon * divU_cr * divV_cr) * dx
-
-# ========== CR MG initialization
-et = meshTopology(mesh, mesh.dim)
-et.Update()
-prolVcr = FacetProlongationTrig2(mesh, et) if dim==2 else FacetProlongationTet2(mesh, et)
-a_cr.Assemble()
-MG_cr = MultiGrid(a_cr.mat, prolVcr, nc=V_cr.ndof,
-                    coarsedofs=fes_cr.FreeDofs(), w1=0.8,
-                    nsmooth=nSmooth, sm="gs", var=True,
-                    he=True, dim=mesh.dim, wcycle=False)
-
-# L2 projection from fes_cr to fes
-# one-to-one corresponding DOFs
-mixmass_cr = BilinearForm(trialspace=fes_cr, testspace=fes)
-mixmass_cr += (u_cr*n) * (v*n) * dx(element_boundary=True)
-mixmass_cr += tang(u_cr) * tang(vhat) * dx(element_boundary=True)
+# L2 projection from fes0 to fes
+mixmass = BilinearForm(trialspace=fes_cr, testspace=fes)
+# tangential part
+mixmass += tang(u_cr) * tang(vhat) * dx(element_boundary=True)
+# normal part
+mixmass += (u_cr*n) * (v*n) * dx(element_boundary=True)
 
 fesMass = BilinearForm(fes)
-fesMass += (u*n) * (v*n) * dx(element_boundary=True)
 fesMass += tang(uhat) * tang(vhat) * dx(element_boundary=True)
+fesMass += (u*n) * (v*n) * dx(element_boundary=True)
+# ========= END of HIGHER ORDER Hdiv-HDG SCHEME TO BE SOLVED ==========
+
+
+
+
+
+
+
+
+
+
+
+# ========= START of HP-MG for HIGHER ORDER Hdiv-HDG ==========
 
 def SolveBVP_CR(level, drawResult=False):
     with TaskManager():
         t0 = timeit.time()
-        fes.Update(); fes_cr.Update()
+        fes.Update(); fes_cr.Update(); W0.Update()
         gfu.Update()
         a.Assemble(); a_cr.Assemble()
         f.Assemble()
-        mixmass_cr.Assemble(); fesMass.Assemble()
-
-        # global dofs mass mat => fesMass is diagonal
-        # but only when dim = 2 !!!!!
-        if dim == 2:
-            fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
-        elif dim == 3:
-            fesM_inv = fesMass.mat.CreateBlockSmoother(FacetPatchBlocks(mesh, fes))
-        E = fesM_inv @ mixmass_cr.mat # E: fes_cr => fes
-        ET = mixmass_cr.mat.T @ fesM_inv
-
-        # CR MG update
+        mixmass.Assemble()
+        fesMass.Assemble()
+        # # ========== CR MG update
         if level > 0:
             et.Update()
             pp = [fes_cr.FreeDofs()]
@@ -205,42 +244,71 @@ def SolveBVP_CR(level, drawResult=False):
             # he_prol
             pp.append(a_cr.mat.Inverse(pdofs, inverse="sparsecholesky"))
             # bk smoother
-            # TODO: WHY THIS IS WRONG???!!!
-            # bjac = et.CreateSmoother(a_cr, {"blocktype": "vertexpatch"})
-            # pp.append(bjac)
             pp.append(VertexPatchBlocks(mesh, fes_cr))
             MG_cr.Update(a_cr.mat, pp)
+
+
+
+        # ========== PRECONDITIONER SETUP START
+        if dim == 2:
+            fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
+        elif dim == 3:
+            fesM_inv = fesMass.mat.CreateBlockSmoother(FacetPatchBlocks(mesh, fes))
+        
+        E = fesM_inv @ mixmass.mat # E: fes0 => fes
+        ET = mixmass.mat.T @ fesM_inv
+        vBlocks = VertexPatchBlocks(mesh, fes)
+        R = SymmetricGS(a.mat.CreateBlockSmoother(vBlocks)) # vertex block GS for p-MG smoothing
         
         # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='sparsecholesky')
         inv_cr = MG_cr
 
-        pre = E @ inv_cr @ ET
+        coarse = R + E @ inv_cr @ ET
+        pre = coarse
+        # pre = R + coarse - R @ a.mat @ coarse - coarse @ a.mat @ R + R @ a.mat @ coarse @ a.mat @ R
+        # pre = E @ inv_cr @ ET
+        # pre = R
         t1 = timeit.time()
 
+
+
+
+        # ========== HDG STATIC CONDENSATION and SOLVED
         # dirichlet BC
-        # homogeneous Dirichlet assumed
+        f.vec.data -= a.mat * gfu.vec
         f.vec.data += a.harmonic_extension_trans * f.vec
-        # gfu.vec.data += E @ inv_cr @ ET * f.vec
-        inv_fes = CGSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=30)
+        # inv_fes = pre
+        inv_fes = CGSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
         gfu.vec.data += inv_fes * f.vec
+        # gfu.vec.data += E @ a_cr.mat.Inverse(fes_cr.FreeDofs()) @ ET * f.vec
         gfu.vec.data += a.harmonic_extension * gfu.vec
         gfu.vec.data += a.inner_solve * f.vec
-            
-        it = inv_fes.iterations
-        # gfu_cr.vec.data += a_cr.mat.Inverse(fes_cr.FreeDofs(True), inverse='umfpack') * f_cr.vec
-        t2 = timeit.time()
 
-        lams = EigenValues_Preconditioner(mat=a_cr.mat, pre=MG_cr)
+
+
+        # ========= PRINT RESULTS
+        t2 = timeit.time()
+        # it = 1  
+        # lams = [1, 1]
+        it = inv_fes.iterations
+        lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
         print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
-        print(f"==> IT: {it}, N_smooth: {nSmooth}, COND: {max(lams)/min(lams):.2E}")
+        print(f"==> IT: {it}, N_smooth: {nSmooth}, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
         if drawResult:
-            Draw(uh, mesh)
+            import netgen.gui
+            Draw(Norm(uh), mesh, 'sol')
+            input('continue?')
             # Draw(uh_cr, mesh)
 
+# ========= END of HP-MG for HIGHER ORDER Hdiv-HDG ==========
 
 
-drawResult = False
-SolveBVP = SolveBVP_CR
+
+
+
+
+
+
 def ecrCheck(level, meshRate=2, prev_uErr=0, prev_LErr=0):
     print(f'LEVEL: {level}, ALL DOFS: {fes.ndof}, GLOBAL DOFS: {W.ndof + M.ndof}')
     L2_uErr = sqrt(Integrate((uh - u_exact) * (uh - u_exact), mesh))
@@ -248,8 +316,8 @@ def ecrCheck(level, meshRate=2, prev_uErr=0, prev_LErr=0):
     L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
     if level > 0:
         u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
-        L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
         print(f"uh L2-error: {L2_uErr:.3E}, uh conv rate: {u_rate:.2E}")
+        L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
         print(f"Lh L2-error: {L2_LErr:.3E}, Lh conv rate: {L_rate:.2E}")
     else:
         print(f"uh L2-error: {L2_uErr:.3E}")
@@ -258,17 +326,19 @@ def ecrCheck(level, meshRate=2, prev_uErr=0, prev_LErr=0):
     print('==============================')
     return (L2_uErr, L2_LErr)
 
-print(f'===== DIM: {mesh.dim}, c_low: {c_low}, eps: {epsilon} =====')
+
+SolveBVP = SolveBVP_CR
+print(f'===== DIM: {mesh.dim}, ORDER:{ order} c_low: {c_low}, eps: {epsilon} =====')
 SolveBVP(0, drawResult)
 prev_uErr, prev_LErr = ecrCheck(0)
 level = 1
 while True:
     # uniform refinement used, meshRate=2 in ecrCheck
     mesh.ngmesh.Refine()
-    # exit if total global dofs exceed a tol
+    # exit if total global dofs exceed a0 tol
     M.Update(); W.Update()
-    if (W.ndof + M.ndof > maxdofs):
-        print(W.ndof + M.ndof)
+    if (sum(W.FreeDofs(True)) + sum(W.FreeDofs(True)) > maxdofs):
+        print(f'# global DOFS {sum(W.FreeDofs(True)) + sum(W.FreeDofs(True))} exceed MAX')
         break
     SolveBVP(level, drawResult)
     prev_uErr, prev_LErr = ecrCheck(level, prev_uErr=prev_uErr, prev_LErr=prev_LErr)

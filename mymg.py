@@ -41,7 +41,7 @@ class SymmetricGS(BaseMatrix):
     def Mult (self, x, y):
         y[:] = 0.0
         self.smoother.Smooth(y, x)
-        self.smoother.SmoothBack(y,x)
+        self.smoother.SmoothBack(y, x)
     def Height (self):
         return self.smoother.height
     def Width (self):
