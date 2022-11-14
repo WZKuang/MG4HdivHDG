@@ -1,51 +1,6 @@
 from ngsolve.la import BaseMatrix
-from ngsolve import BitArray, CreateVVector, Norm, sqrt, Projector, Vector, \
-        Matrix
-import numpy as np
+from ngsolve import BitArray, CreateVVector, Projector
 
-# DEFINE AUXILIARY FUNCTIONS
-def VertexPatchBlocks(mesh, fes):
-    blocks = []
-    freedofs = fes.FreeDofs(True)
-    for v in mesh.vertices:
-        vdofs = set()
-        for f in mesh[v].elements:
-            vdofs |= set(d for d in fes.GetDofNrs(f) if freedofs[d])
-        blocks.append(vdofs)
-    return blocks
-
-def EdgePatchBlocks(mesh, fes):
-    blocks = []
-    freedofs = fes.FreeDofs(True)
-    for v in mesh.edges:
-        vdofs = set()
-        for el in mesh[v].elements:
-            vdofs |= set(d for d in fes.GetDofNrs(el) if freedofs[d])
-        blocks.append(vdofs)
-    return blocks
-
-def FacetPatchBlocks(mesh, fes):
-    blocks = []
-    freedofs = fes.FreeDofs(True)
-    for f in mesh.faces:
-        fdofs = set()
-        for el in mesh[f].elements:
-            fdofs |= set(d for d in fes.GetDofNrs(el) if freedofs[d])
-        blocks.append(fdofs)
-    return blocks
-
-class SymmetricGS(BaseMatrix):
-    def __init__ (self, smoother):
-        super(SymmetricGS, self).__init__()
-        self.smoother = smoother
-    def Mult (self, x, y):
-        y[:] = 0.0
-        self.smoother.Smooth(y, x)
-        self.smoother.SmoothBack(y, x)
-    def Height (self):
-        return self.smoother.height
-    def Width (self):
-        return self.smoother.height
 
 # multigrid with variable smoothing
 class MultiGrid(BaseMatrix):

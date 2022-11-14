@@ -6,11 +6,12 @@ from distutils.log import error
 from ngsolve import *
 from netgen.geom2d import SplineGeometry, unit_square
 import time as timeit
-from netgen.csg import *
+from netgen.csg import unit_cube
 from ngsolve.krylovspace import CGSolver, CG
-from prol import *
-from mymg import *
-from ngsolve.la import EigenValues_Preconditioner
+# customized functions
+from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
+from mymg import MultiGrid
+from mySmoother import VertexPatchBlocks, FacetPatchBlocks, SymmetricGS
 
 import sys
 if len(sys.argv) < 4:

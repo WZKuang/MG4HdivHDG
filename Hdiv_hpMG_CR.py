@@ -1,15 +1,18 @@
 # Stokes, hp-MG preconditioned CG solver
 # One time Lagrangian Augmented Uzawa iteration
-from distutils.log import error
 from ngsolve import *
-from ngsolve.meshes import *
-from netgen.geom2d import SplineGeometry
 import time as timeit
-from netgen.csg import *
 from ngsolve.krylovspace import CGSolver
-from prol import *
-from mymg import *
 from ngsolve.la import EigenValues_Preconditioner
+# geometry
+from ngsolve.meshes import MakeStructured2DMesh
+from netgen.csg import unit_cube
+# customized functions
+from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
+from mymg import MultiGrid
+from mySmoother import VertexPatchBlocks, FacetPatchBlocks, EdgePatchBlocks, SymmetricGS
+from myStokesHelper import stokesInit
+from myASP import MultiASP
 
 import sys
 if len(sys.argv) < 4:
@@ -18,68 +21,21 @@ dim = int(sys.argv[1])
 c_low = int(sys.argv[2])
 nSmooth = int(sys.argv[3])
 
+if dim != 2 and dim != 3:
+    print('WRONG DIMENSION!'); exit(1)
+
 iniN = 4
 maxdofs = 1e5
-epsilon = 1e-6
-order = 3
+epsilon = 1e-8
+order = 6
 drawResult = False
 
 # ========== START of MESH and EXACT SOLUTION ==========
-if dim == 2:
-    mesh = MakeStructured2DMesh(quads=False, nx=iniN)
-    # exact solution
-    u_exact1 = x ** 2 * (x - 1) ** 2 * 2 * y * (1 - y) * (2 * y - 1)
-    u_exact2 = y ** 2 * (y - 1) ** 2 * 2 * x * (x - 1) * (2 * x - 1)
-    u_exact = CF((u_exact1, u_exact2))
-
-    L_exactXX = (2 * x * (x - 1) ** 2 * 2 * y * (1 - y) * (2 * y - 1)
-                            + x ** 2 * 2 * (x - 1) * 2 * y * (1 - y) * (2 * y - 1))
-    L_exactXY = (x ** 2 * (x - 1) ** 2 * 2 * (1 - y) * (2 * y - 1)
-                            - x ** 2 * (x - 1) ** 2 * 2 * y * (2 * y - 1)
-                            + 2 * x ** 2 * (x - 1) ** 2 * 2 * y * (1 - y))
-    L_exactYX = (y ** 2 * (y - 1) ** 2 * 2 * (x - 1) * (2 * x - 1)
-                            + y ** 2 * (y - 1) ** 2 * 2 * x * (2 * x - 1)
-                            + 2 * y ** 2 * (y - 1) ** 2 * 2 * x * (x - 1))
-    L_exactYY = (2 * y * (y - 1) ** 2 * 2 * x * (x - 1) * (2 * x - 1)
-                            + y ** 2 * 2 * (y - 1) * 2 * x * (x - 1) * (2 * x - 1))
-    L_exact = CF((L_exactXX, L_exactXY, L_exactYX, L_exactYY), dims=(2, 2))
-
-    p_exact = x * (1 - x) * (1 - y) - 1 / 12
-elif dim == 3:
-    mesh = Mesh(unit_cube.GenerateMesh(maxh=1/iniN))
-    # exact solution
-    u_exact1 = x ** 2 * (x - 1) ** 2 * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-    u_exact2 = y ** 2 * (y - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-    u_exact3 = -2 * z ** 2 * (z - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-    u_exact = CF((u_exact1, u_exact2, u_exact3))
-
-    L_exactXX = (2 * x * (x - 1) ** 2 * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                            + x ** 2 * 2 * (x - 1) * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-    L_exactXY = (x ** 2 * (x - 1) ** 2 * (2 - 12 * y + 12 * y ** 2) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-    L_exactXZ = (x ** 2 * (x - 1) ** 2 * (2 - 12 * z + 12 * z ** 2) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-    L_exactYX = (y ** 2 * (y - 1) ** 2 * (2 - 12 * x + 12 * x ** 2) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-    L_exactYY = (2 * y * (y - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                            + y ** 2 * 2 * (y - 1) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-    L_exactYZ = (y ** 2 * (y - 1) ** 2 * (2 - 12 * z + 12 * z ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-    L_exactZX = (-2 * z ** 2 * (z - 1) ** 2 * (2 - 12 * x + 12 * x ** 2) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-    L_exactZY = (-2 * z ** 2 * (z - 1) ** 2 * (2 - 12 * y + 12 * y ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-    L_exactZZ = (
-                -2 * 2 * z * (z - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-                - 2 * z ** 2 * 2 * (z - 1) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-    L_exact = CF((L_exactXX, L_exactXY, L_exactXZ,
-                    L_exactYX, L_exactYY, L_exactYZ,
-                    L_exactZX, L_exactZY, L_exactZZ), dims=(3, 3))
-
-    p_exact = x * (1 - x) * (1 - y) * (1 - z) - 1 / 24
-else:
-    error('WRONG DIMENSION!'); exit()
-
+mesh = MakeStructured2DMesh(quads=False, nx=iniN) if dim == 2 \
+       else Mesh(unit_cube.GenerateMesh(maxh=1/iniN))
+helper = stokesInit(dim)
+u_exact, _, _ = helper.getExactSol()
 # ========== END of MESH and EXACT SOLUTION ==========
-
-
-
-
-
 
 
 
@@ -91,7 +47,8 @@ def tang(v):
         return v - (v*n)*n
 # ========== START of CR MG SETUP for P-MG ==========
 # # ========= Crouzeix-Raviart scheme =========
-W0 = HDiv(mesh, order=0, RT=True, dirichlet=".*")
+W0 = HDiv(mesh, order=0, RT=True, dirichlet=".*") if mesh.dim == 2 \
+     else HDiv(mesh, order=0, dirichlet=".*")
 V_cr = FESpace('nonconforming', mesh, dirichlet='.*')
 if mesh.dim == 2:
     fes_cr = V_cr * V_cr
@@ -121,7 +78,8 @@ a_cr += (InnerProduct(GradU_cr, GradV_cr)
 # # ========== CR MG initialization
 et = meshTopology(mesh, mesh.dim)
 et.Update()
-prolVcr = FacetProlongationTrig2(mesh, et) if dim==2 else FacetProlongationTet2(mesh, et)
+prolVcr = FacetProlongationTrig2(mesh, et) if dim==2 \
+          else FacetProlongationTet2(mesh, et)
 with TaskManager():
     a_cr.Assemble()
     MG_cr = MultiGrid(a_cr.mat, prolVcr, nc=V_cr.ndof,
@@ -130,9 +88,6 @@ with TaskManager():
                         he=True, dim=mesh.dim, wcycle=False)
 
 # ========== END of CR MG SETUP for P-MG ==========
-
-
-
 
 
 
@@ -151,7 +106,7 @@ elif mesh.dim == 3:
 M = TangentialFacetFESpace(mesh, order=order, dirichlet=".*")
 
 fes = V * W * M 
-(L, u,uhat),  (G, v,vhat) = fes.TnT()
+(L, u,uhat),  (G, v, vhat) = fes.TnT()
 
 gfu = GridFunction (fes)
 Lh, uh, uhath = gfu.components
@@ -166,37 +121,6 @@ a += (1/epsilon * div(u) * div(v)) * dx
 a += (InnerProduct(L, G) + c_low * u * v
       -InnerProduct(gradu, G) + InnerProduct(L, gradv)) * dx
 a += (tang(u-uhat) * tang(G*n) - tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
-
-# linear form 
-if dim == 2:
-    f = LinearForm(fes)
-    f += (-(4 * y * (1 - y) * (2 * y - 1) * ((1 - 2 * x) ** 2 - 2 * x * (1 - x))
-                    + 12 * x ** 2 * (1 - x) ** 2 * (1 - 2 * y))
-            + (1 - 2 * x) * (1 - y)) * v[0] * dx
-    f += (-(4 * x * (1 - x) * (1 - 2 * x) * ((1 - 2 * y) ** 2 - 2 * y * (1 - y))
-                    + 12 * y ** 2 * (1 - y) ** 2 * (2 * x - 1))
-            - x * (1 - x)) * v[1] * dx
-    f += c_low * u_exact * v * dx
-elif dim == 3:
-    f = LinearForm(fes)
-    f += (-((2 - 12 * x + 12 * x ** 2) * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                        + (x ** 2 - 2 * x ** 3 + x ** 4) * (-12 + 24 * y) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                        + (x ** 2 - 2 * x ** 3 + x ** 4) * (-12 + 24 * z) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-            + (1 - 2 * x) * (1 - y) * (1 - z)
-            ) * v[0] * dx
-    f += (-((2 - 12 * y + 12 * y ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                    + (y ** 2 - 2 * y ** 3 + y ** 4) * (-12 + 24 * x) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                    + (y ** 2 - 2 * y ** 3 + y ** 4) * (-12 + 24 * z) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-            - x * (1 - x) * (1 - z)
-            ) * v[1] * dx
-    f += (2 * (
-                (2 - 12 * z + 12 * z ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-                + (z ** 2 - 2 * z ** 3 + z ** 4) * (-12 + 24 * x) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-                + (z ** 2 - 2 * z ** 3 + z ** 4) * (-12 + 24 * y) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-            - x * (1 - x) * (1 - y)
-            ) * v[2] * dx
-    f += c_low * u_exact * v * dx
-
 
 # L2 projection from fes0 to fes
 mixmass = BilinearForm(trialspace=fes_cr, testspace=fes)
@@ -228,7 +152,10 @@ def SolveBVP_CR(level, drawResult=False):
         fes.Update(); fes_cr.Update(); W0.Update()
         gfu.Update()
         a.Assemble(); a_cr.Assemble()
-        f.Assemble()
+        # rhs linear form
+        f = LinearForm(fes)
+        f.vec.data = helper.getRhs(fes, c_low, testV=v)
+
         mixmass.Assemble()
         fesMass.Assemble()
         # # ========== CR MG update
@@ -253,7 +180,10 @@ def SolveBVP_CR(level, drawResult=False):
         if dim == 2:
             fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
         elif dim == 3:
-            fesM_inv = fesMass.mat.CreateBlockSmoother(FacetPatchBlocks(mesh, fes))
+            # TODO: facetPatchBlocks is not correct here. WHY????
+            # TODO: facetPatchBlocks is not correct here. WHY????
+            # fesM_inv = fesMass.mat.CreateBlockSmoother(FacetPatchBlocks(mesh, fes))
+            fesM_inv = fesMass.mat.Inverse(fes.FreeDofs(True), inverse='sparsecholesky')
         
         E = fesM_inv @ mixmass.mat # E: fes0 => fes
         ET = mixmass.mat.T @ fesM_inv
@@ -262,12 +192,12 @@ def SolveBVP_CR(level, drawResult=False):
         
         # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='sparsecholesky')
         inv_cr = MG_cr
+        coarse = E @ inv_cr @ ET
 
-        coarse = R + E @ inv_cr @ ET
-        pre = coarse
-        # pre = R + coarse - R @ a.mat @ coarse - coarse @ a.mat @ R + R @ a.mat @ coarse @ a.mat @ R
-        # pre = E @ inv_cr @ ET
-        # pre = R
+        pre = MultiASP(a.mat, fes.FreeDofs(True), coarse, smoother=a.mat.CreateBlockSmoother(vBlocks), nSm=1)
+        # pre = R + R - R @ a.mat @ R \
+        #     + coarse - R @ a.mat @ coarse - coarse @ a.mat @ R + R @ a.mat @ coarse @ a.mat @ R # Multiplicative ASP
+        # pre = R + E @ inv_cr @ ET # additive ASP
         t1 = timeit.time()
 
 
@@ -280,7 +210,6 @@ def SolveBVP_CR(level, drawResult=False):
         # inv_fes = pre
         inv_fes = CGSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
         gfu.vec.data += inv_fes * f.vec
-        # gfu.vec.data += E @ a_cr.mat.Inverse(fes_cr.FreeDofs()) @ ET * f.vec
         gfu.vec.data += a.harmonic_extension * gfu.vec
         gfu.vec.data += a.inner_solve * f.vec
 
@@ -308,40 +237,23 @@ def SolveBVP_CR(level, drawResult=False):
 
 
 
-
-def ecrCheck(level, meshRate=2, prev_uErr=0, prev_LErr=0):
-    print(f'LEVEL: {level}, ALL DOFS: {fes.ndof}, GLOBAL DOFS: {W.ndof + M.ndof}')
-    L2_uErr = sqrt(Integrate((uh - u_exact) * (uh - u_exact), mesh))
-    L2_LErr = sqrt(Integrate(InnerProduct((Lh - L_exact), (Lh - L_exact)), mesh))
-    L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
-    if level > 0:
-        u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
-        print(f"uh L2-error: {L2_uErr:.3E}, uh conv rate: {u_rate:.2E}")
-        L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
-        print(f"Lh L2-error: {L2_LErr:.3E}, Lh conv rate: {L_rate:.2E}")
-    else:
-        print(f"uh L2-error: {L2_uErr:.3E}")
-        print(f"Lh L2-error: {L2_LErr:.3E}")
-    print(f'uh divErr: {L2_divErr:.1E}')
-    print('==============================')
-    return (L2_uErr, L2_LErr)
-
-
 SolveBVP = SolveBVP_CR
 print(f'===== DIM: {mesh.dim}, ORDER:{ order} c_low: {c_low}, eps: {epsilon} =====')
 SolveBVP(0, drawResult)
-prev_uErr, prev_LErr = ecrCheck(0)
+prev_uErr, prev_LErr = helper.ecrCheck(0, fes, mesh, uh, Lh)
 level = 1
 while True:
     # uniform refinement used, meshRate=2 in ecrCheck
-    mesh.ngmesh.Refine()
+    if mesh.dim == 2: mesh.ngmesh.Refine(); meshrate = 2
+    else:   mesh.Refine(onlyonce = True); meshrate = sqrt(2)
     # exit if total global dofs exceed a0 tol
     M.Update(); W.Update()
     if (sum(W.FreeDofs(True)) + sum(W.FreeDofs(True)) > maxdofs):
         print(f'# global DOFS {sum(W.FreeDofs(True)) + sum(W.FreeDofs(True))} exceed MAX')
         break
     SolveBVP(level, drawResult)
-    prev_uErr, prev_LErr = ecrCheck(level, prev_uErr=prev_uErr, prev_LErr=prev_LErr)
+    prev_uErr, prev_LErr = helper.ecrCheck(level, fes, mesh, uh, Lh, meshRate = meshrate, 
+                                           prev_uErr=prev_uErr, prev_LErr=prev_LErr)
     level += 1
 
         
