@@ -1,6 +1,5 @@
 # mixed Hdiv-HDG for Stokes, hp-MG preconditioned CG solver
-# One time Augmented Lagrangian Uzawa iteration
-# TODO: multi iteration AL uzawa
+# Augmented Lagrangian Uzawa iteration for outer iteration
 from ngsolve import *
 import time as timeit
 from ngsolve.krylovspace import CGSolver
@@ -27,14 +26,15 @@ if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
 # TODO: iniN can not be too small????
-iniN = 4
+iniN = 2
 maxdofs = 2e5
 maxLevel = 5
 epsilon = 1e-8
+uzawaIt = 1
 drawResult = False
 
 # ========== START of MESH and EXACT SOLUTION ==========
-mesh = MakeStructured2DMesh(quads=False, nx=iniN) if dim == 2 \
+mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN) if dim == 2 \
        else Mesh(unit_cube.GenerateMesh(maxh=1/iniN))
 helper = stokesHelper(dim)
 helper.squareSolInit()
@@ -131,6 +131,15 @@ mixmass += (u_cr*n) * (v*n) * dx(element_boundary=True)
 fesMass = BilinearForm(fes)
 fesMass += tang(uhat) * tang(vhat) * dx(element_boundary=True)
 fesMass += (u*n) * (v*n) * dx(element_boundary=True)
+
+
+# ========== secondary variable operator for AL uzawa method
+Q = L2(mesh, order=order)
+p, q = Q.TnT()
+b = BilinearForm(trialspace=Q, testspace=fes)
+b += - p * div(v) * dx
+pMass = BilinearForm(Q)
+pMass += p * q * dx
 # ========= END of HIGHER ORDER Hdiv-HDG SCHEME TO BE SOLVED ==========
 
 
@@ -189,37 +198,51 @@ def SolveBVP_CR(level, drawResult=False):
                        smoother=a.mat.CreateBlockSmoother(vblocks) if dim==2 
                                 else a.mat.CreateBlockSmoother(eblocks), 
                        nSm=0 if order==0 else 1)
-        # R = SymmetricGS(a.mat.CreateBlockSmoother(eblocks)) # block GS for p-MG smoothing
+        # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
         # pre = R + E @ inv_cr @ ET # additive ASP
         t1 = timeit.time()
 
 
 
-        # ========== HDG STATIC CONDENSATION and SOLVED
-        # dirichlet BC
-        f.vec.data -= a.mat * gfu.vec
-        f.vec.data += a.harmonic_extension_trans * f.vec
-        # inv_fes = pre
-        inv_fes = CGSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
-        gfu.vec.data += inv_fes * f.vec
-        gfu.vec.data += a.harmonic_extension * gfu.vec
-        gfu.vec.data += a.inner_solve * f.vec
+        # ========== HDG STATIC CONDENSATION and SOLVED by AL uzawa
+        p_prev = GridFunction(Q)
+        p_prev.vec.data[:] = 0
+        Q.Update()
+        b.Assemble() #b += - p * div(v) * dx
+        pMass.Assemble()
+        # p mass diagonal in both 2D and 3D cases
+        pMass_inv= pMass.mat.CreateSmoother(Q.FreeDofs())
+        print(pMass.mat)
+        input('continue?')
+        it = 0
+        for _ in range(uzawaIt):
+            # homo dirichlet BC
+            gfu.vec.data[:] = 0
+            rhs = f.vec.CreateVector()
+            rhs.data = f.vec - a.mat * gfu.vec
+            rhs.data += -b.mat * p_prev.vec
+            # update L and u
+            rhs.data += a.harmonic_extension_trans * rhs
 
+            inv_fes = CGSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
+            gfu.vec.data += inv_fes * rhs
+            gfu.vec.data += a.harmonic_extension * gfu.vec
+            gfu.vec.data += a.inner_solve * rhs
+            # update pressure
+            p_prev.vec.data += 1/epsilon * (pMass_inv @ b.mat.T * gfu.vec.data)
+            it += inv_fes.iterations
 
 
         # ========= PRINT RESULTS
         t2 = timeit.time()
-        # it = 1  
-        # lams = [1, 1]
-        it = inv_fes.iterations
+        it //= uzawaIt
         lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
         print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
-        print(f"==> IT: {it}, N_smooth: {nMGSmooth}, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
+        print(f"==> AVG IT: {it}, N_smooth: {nMGSmooth}, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
         if drawResult:
             import netgen.gui
             Draw(Norm(uh), mesh, 'sol')
             input('continue?')
-            # Draw(uh_cr, mesh)
 
 # ========= END of HP-MG for HIGHER ORDER Hdiv-HDG ==========
 
