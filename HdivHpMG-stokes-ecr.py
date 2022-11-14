@@ -1,5 +1,7 @@
 # mixed Hdiv-HDG for Stokes, hp-MG preconditioned CG solver
 # Augmented Lagrangian Uzawa iteration for outer iteration
+# Knonw solution for checking order of convergence
+
 from ngsolve import *
 import time as timeit
 from ngsolve.krylovspace import CGSolver
@@ -212,8 +214,6 @@ def SolveBVP_CR(level, drawResult=False):
         pMass.Assemble()
         # p mass diagonal in both 2D and 3D cases
         pMass_inv= pMass.mat.CreateSmoother(Q.FreeDofs())
-        print(pMass.mat)
-        input('continue?')
         it = 0
         for _ in range(uzawaIt):
             # homo dirichlet BC

@@ -1,4 +1,4 @@
-# exact solutions and helpers for Stokes equations, domain = [1 x 1]^d
+# exact solutions and corresponding helpers for Stokes equations, domain = [1 x 1]^d
 # by Wenzheng Kuang, 11/13/2022
 from ngsolve import *
 
@@ -109,19 +109,5 @@ class stokesHelper:
         print('==============================')
         return (L2_uErr, L2_LErr)
 
-
-    # # ========== TODO: Augmented Lagrangian Uzawa iteration
-    # def alUzawa(self, uzIt, primalSol, pressureSol):
-    #     p_prev = GridFunction(Q)  # previous pressure solution
-    #     p_prev.vec[:] = 0  # initialize
-    #     for _ in range(uzIt):
-    #         # dirichlet BC, TODO: Dirichlet BC set after each iteration?
-    #         gfu0.vec.data[:] = 0
-    #         gfu0.vec.data += inv * (f0.vec - MFesEmb @ p_M_mix.mat * p_prev.vec)
-    #         p_prev.vec.data += c_div * (pMass_inv @ p_M_mix.mat.T @ MFesEmb.T * gfu0.vec.data)
-    #         it = it + 1 if directSol else it + inv.iterations
-    #     it /= uzIt
-    #     # p_prev -> gfu
-    #     gfu.vec.data += pFesEmb * p_prev.vec
 
 
