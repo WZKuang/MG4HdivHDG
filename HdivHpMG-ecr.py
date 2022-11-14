@@ -1,5 +1,6 @@
 # mixed Hdiv-HDG for Stokes, hp-MG preconditioned CG solver
-# One time Lagrangian Augmented Uzawa iteration
+# One time Augmented Lagrangian Uzawa iteration
+# TODO: multi iteration AL uzawa
 from ngsolve import *
 import time as timeit
 from ngsolve.krylovspace import CGSolver
