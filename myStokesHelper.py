@@ -2,10 +2,12 @@
 # by Wenzheng Kuang, 11/13/2022
 from ngsolve import *
 
-class stokesInit:
+class stokesHelper:
     def __init__(self, dim):
         self.dim = dim
 
+    # ========== exact sol in a unit square/cube
+    def squareSolInit(self):
         if self.dim == 2:
             # exact solution
             u_exact1 = x ** 2 * (x - 1) ** 2 * 2 * y * (1 - y) * (2 * y - 1)
@@ -50,7 +52,12 @@ class stokesInit:
                             L_exactZX, L_exactZY, L_exactZZ), dims=(3, 3))
 
             self.p_exact = x * (1 - x) * (1 - y) * (1 - z) - 1 / 24
+    
+    def getExactSol(self):
+        return (self.u_exact, self.L_exact, self.p_exact)
 
+
+    # ========== rhs corresponding to the exact sol
     def getRhs(self, fes, c_low, testV):
         f = LinearForm(fes)
         if self.dim == 2:
@@ -83,10 +90,8 @@ class stokesInit:
         with TaskManager():
             f.Assemble()
             return f.vec.data
-    
-    def getExactSol(self):
-        return (self.u_exact, self.L_exact, self.p_exact)
 
+    # ========== convergence order check with respect to the exact sol
     def ecrCheck(self, level, fes, mesh, uh, Lh, meshRate=2, prev_uErr=0, prev_LErr=0):
         print(f'LEVEL: {level}, ALL DOFS: {fes.ndof}, GLOBAL DOFS: {sum(fes.FreeDofs(True))}')
         L2_uErr = sqrt(Integrate((uh - self.u_exact) * (uh - self.u_exact), mesh))
@@ -103,4 +108,20 @@ class stokesInit:
         print(f'uh divErr: {L2_divErr:.1E}')
         print('==============================')
         return (L2_uErr, L2_LErr)
+
+
+    # # ========== TODO: Augmented Lagrangian Uzawa iteration
+    # def alUzawa(self, uzIt, primalSol, pressureSol):
+    #     p_prev = GridFunction(Q)  # previous pressure solution
+    #     p_prev.vec[:] = 0  # initialize
+    #     for _ in range(uzIt):
+    #         # dirichlet BC, TODO: Dirichlet BC set after each iteration?
+    #         gfu0.vec.data[:] = 0
+    #         gfu0.vec.data += inv * (f0.vec - MFesEmb @ p_M_mix.mat * p_prev.vec)
+    #         p_prev.vec.data += c_div * (pMass_inv @ p_M_mix.mat.T @ MFesEmb.T * gfu0.vec.data)
+    #         it = it + 1 if directSol else it + inv.iterations
+    #     it /= uzIt
+    #     # p_prev -> gfu
+    #     gfu.vec.data += pFesEmb * p_prev.vec
+
 

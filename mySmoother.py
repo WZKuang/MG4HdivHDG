@@ -32,6 +32,12 @@ def FacetPatchBlocks(mesh, fes):
         blocks.append(fdofs)
     return blocks
 
+def FacetBlocks(mesh, fes):
+    blocks = []
+    for f in mesh.faces:
+        blocks.append(set(d for d in fes.GetDofNrs(f) if fes.FreeDofs(True)[d]))
+    return blocks
+
 class SymmetricGS(BaseMatrix):
     def __init__ (self, smoother):
         super(SymmetricGS, self).__init__()

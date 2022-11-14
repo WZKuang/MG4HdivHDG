@@ -7,7 +7,7 @@ import numpy as np
 
 # multigrid with variable smoothing
 class MultiASP(BaseMatrix):
-    def __init__ (self, mat, activeDOFs, coarseSolver, smoother, nSm):
+    def __init__ (self, mat, activeDOFs, coarseSolver, smoother, nSm=1):
         super().__init__()
         self.mat = mat
         self.activeDOFs = activeDOFs
@@ -33,7 +33,7 @@ class MultiASP(BaseMatrix):
         residual.data = b - self.mat * rho
 
         # ========== coarse grid correction
-        # FIXME: Projector project out inactive dofs on fine level
+        # Projector project out inactive dofs on fine level
         residual.data = Projector(self.activeDOFs, True) * residual
         correction.data = self.coarseSol * residual
         ### Project out inactive DOFs
