@@ -26,13 +26,12 @@ order = int(sys.argv[4])
 if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
-# TODO: iniN can not be too small????
-iniN = 2
-maxdofs = 2e5
+iniN = 2 if dim == 2 else 1
+maxdofs = 5e7
 maxLevel = 5
 epsilon = 1e-8
 uzawaIt = 1
-drawResult = True
+drawResult = False
 
 # ========== START of MESH and BC==========
 L = 4
@@ -191,11 +190,11 @@ def SolveBVP_CR(level, drawResult=False):
             # he_prol
             pp.append(a_cr.mat.Inverse(pdofs, inverse="sparsecholesky"))
             # bk smoother
-            # pp.append(VertexPatchBlocks(mesh, fes_cr))
-            if dim == 2:
-                pp.append(VertexPatchBlocks(mesh, fes_cr))
-            elif dim == 3:
-                pp.append(EdgePatchBlocks(mesh, fes_cr))
+            pp.append(VertexPatchBlocks(mesh, fes_cr))
+            # if dim == 2:
+            #     pp.append(VertexPatchBlocks(mesh, fes_cr))
+            # elif dim == 3:
+            #     pp.append(EdgePatchBlocks(mesh, fes_cr))
             MG_cr.Update(a_cr.mat, pp)
 
 
@@ -209,15 +208,14 @@ def SolveBVP_CR(level, drawResult=False):
         E = fesM_inv @ mixmass.mat # E: fes0 => fes
         ET = mixmass.mat.T @ fesM_inv
         vblocks = VertexPatchBlocks(mesh, fes)
-        eblocks = EdgePatchBlocks(mesh, fes)
+        # eblocks = EdgePatchBlocks(mesh, fes)
         
         # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='sparsecholesky')
         inv_cr = MG_cr
         coarse = E @ inv_cr @ ET
 
         pre = MultiASP(a.mat, fes.FreeDofs(True), coarse, 
-                       smoother=a.mat.CreateBlockSmoother(vblocks) if dim==2 
-                                else a.mat.CreateBlockSmoother(eblocks), 
+                       smoother=a.mat.CreateBlockSmoother(vblocks), 
                        nSm=0 if order==0 else 1)
         # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
         # pre = R + E @ inv_cr @ ET # additive ASP
@@ -275,19 +273,19 @@ print(f'===== DIM: {mesh.dim}, ORDER:{ order} c_low: {c_low}, eps: {epsilon} ===
 SolveBVP(0, drawResult)
 level = 1
 while True:
-    # uniform refinement used, meshRate=2 in ecrCheck
-    mesh.ngmesh.Refine(); meshrate = 2
-    # if mesh.dim == 2:
-    #     mesh.ngmesh.Refine(); meshrate = 2
-    # else:
-    #     mesh.Refine(onlyonce = True); meshrate = sqrt(2)
+    # # uniform refinement used, meshRate=2 in ecrCheck
+    # mesh.ngmesh.Refine(); meshrate = 2
+    if mesh.dim == 2:
+        mesh.ngmesh.Refine(); meshrate = 2
+    else:
+        mesh.Refine(onlyonce = True); meshrate = sqrt(2)
         
     # exit if total global dofs exceed a0 tol
     M.Update(); W.Update()
     if (sum(W.FreeDofs(True)) + sum(W.FreeDofs(True)) > maxdofs) or level > maxLevel:
-        print(f'# global DOFS {sum(W.FreeDofs(True)) + sum(W.FreeDofs(True))}')
         break
     print(f'===== LEVEL {level} =====')
+    print(f'# global DOFS {sum(W.FreeDofs(True)) + sum(W.FreeDofs(True))}')
     SolveBVP(level, drawResult)
     print(f'======================')
     level += 1

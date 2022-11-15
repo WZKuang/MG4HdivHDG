@@ -27,8 +27,7 @@ order = int(sys.argv[4])
 if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
-# TODO: iniN can not be too small????
-iniN = 2
+iniN = 2 if dim == 2 else 1
 maxdofs = 2e5
 maxLevel = 5
 epsilon = 1e-8
