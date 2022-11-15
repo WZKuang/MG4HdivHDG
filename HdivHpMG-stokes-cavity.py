@@ -104,7 +104,8 @@ V = MatrixValued(L2(mesh, order=order), mesh.dim, False)
 if mesh.dim == 2:
     W = HDiv(mesh, order=order, RT=True, dirichlet=".*")
 elif mesh.dim == 3:
-    W = HDiv(mesh, order=order, dirichlet=".*") # inconsistent option in NGSolve
+    W = HDiv(mesh, order=order, 
+             RT=True if order>=1 else False, dirichlet=".*") # inconsistent option when lowest order
 M = TangentialFacetFESpace(mesh, order=order, dirichlet=".*")
 
 fes = V * W * M 
@@ -270,6 +271,7 @@ while True:
         break
     print(f'===== LEVEL {level} =====')
     SolveBVP(level, drawResult)
+    print(f'======================')
     level += 1
 
 # ========= END of MAIN ==========
