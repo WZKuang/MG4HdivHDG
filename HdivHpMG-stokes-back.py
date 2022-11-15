@@ -1,19 +1,18 @@
 # mixed Hdiv-HDG for Stokes, hp-MG preconditioned CG solver
 # Augmented Lagrangian Uzawa iteration for outer iteration
-# Knonw solution for checking order of convergence
+# Backward-facing step flow problem
 
 from ngsolve import *
 import time as timeit
 from ngsolve.krylovspace import CGSolver
 from ngsolve.la import EigenValues_Preconditioner
 # geometry
-from ngsolve.meshes import MakeStructured2DMesh
-from netgen.csg import unit_cube
+from netgen.geom2d import SplineGeometry
+from netgen.csg import CSGeometry, Plane, OrthoBrick, Pnt, Vec
 # customized functions
 from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
 from myMG import MultiGrid
 from mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
-from myStokesHelper import stokesHelper
 from myASP import MultiASP
 
 import sys
@@ -33,16 +32,36 @@ maxdofs = 2e5
 maxLevel = 5
 epsilon = 1e-8
 uzawaIt = 1
-drawResult = False
+drawResult = True
 
-# ========== START of MESH and EXACT SOLUTION ==========
-mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN) if dim == 2 \
-       else Mesh(unit_cube.GenerateMesh(maxh=1/iniN))
-helper = stokesHelper(dim)
-helper.squareSolInit()
-u_exact, _, _ = helper.getExactSol()
-# ========== END of MESH and EXACT SOLUTION ==========
+# ========== START of MESH and BC==========
+L = 4
+if dim == 2:
+    ## Backwards-facing step flow geo
+    geo = SplineGeometry()
+    pnts = [(0.5,0),(L,0),(L,1),(0,1),(0,0.5),(0.5,0.5)]
+    pind = [geo.AppendPoint(*pnt) for pnt in pnts]
+    geo.Append(['line',pind[0],pind[1]],leftdomain=1,rightdomain=0,bc="wall")
+    geo.Append(['line',pind[1],pind[2]],leftdomain=1,rightdomain=0,bc="outlet")
+    geo.Append(['line',pind[2],pind[3]],leftdomain=1,rightdomain=0,bc="wall")
+    geo.Append(['line',pind[3],pind[4]],leftdomain=1,rightdomain=0,bc="inlet")
+    geo.Append(['line',pind[4],pind[5]],leftdomain=1,rightdomain=0,bc="wall")
+    geo.Append(['line',pind[5],pind[0]],leftdomain=1,rightdomain=0,bc="wall")
+    mesh = Mesh(geo.GenerateMesh(maxh=1/iniN))
 
+    uin = CoefficientFunction((16*(1-y)*(y-0.5),0))
+elif dim == 3:
+    ## Backwards-facing step flow geo
+    geo = CSGeometry()
+    left = Plane(Pnt(0,0,0),Vec(-1,0,0)).bc("inlet")
+    right = Plane(Pnt(L,0,0),Vec(1,0,0)).bc("outlet")
+    box1 = OrthoBrick(Pnt(-1,0,0),Pnt(L+1,1,1)).bc("wall")
+    box2 = OrthoBrick(Pnt(-1,-1,-1),Pnt(0.5,3,0.5)).bc("wall")
+    geo.Add(box1*left*right-box2)
+    mesh = Mesh(geo.GenerateMesh(maxh=1/iniN))
+
+    uin = CoefficientFunction((64*(1-z)*(z-0.5)*(1-y)*y,0,0))
+# ========== END of MESH ==========
 
 
 
@@ -53,9 +72,9 @@ def tang(v):
         return v - (v*n)*n
 # ========== START of CR MG SETUP for P-MG ==========
 # # ========= Crouzeix-Raviart scheme =========
-W0 = HDiv(mesh, order=0, RT=True, dirichlet=".*") if mesh.dim == 2 \
-     else HDiv(mesh, order=0, dirichlet=".*")
-V_cr = FESpace('nonconforming', mesh, dirichlet='.*')
+W0 = HDiv(mesh, order=0, RT=True, dirichlet="wall|inlet") if mesh.dim == 2 \
+     else HDiv(mesh, order=0, dirichlet="wall|inlet")
+V_cr = FESpace('nonconforming', mesh, dirichlet="wall|inlet")
 if mesh.dim == 2:
     fes_cr = V_cr * V_cr
     (ux_cr, uy_cr), (vx_cr, vy_cr) = fes_cr.TnT()
@@ -101,10 +120,10 @@ with TaskManager():
 # ========= mixed-HidvHDG scheme =========
 V = MatrixValued(L2(mesh, order=order), mesh.dim, False)
 if mesh.dim == 2:
-    W = HDiv(mesh, order=order, RT=True, dirichlet=".*")
+    W = HDiv(mesh, order=order, RT=True, dirichlet="wall|inlet")
 elif mesh.dim == 3:
-    W = HDiv(mesh, order=order, dirichlet=".*") # inconsistent option in NGSolve
-M = TangentialFacetFESpace(mesh, order=order, dirichlet=".*")
+    W = HDiv(mesh, order=order, dirichlet="wall|inlet") # inconsistent option in NGSolve
+M = TangentialFacetFESpace(mesh, order=order, dirichlet="wall|inlet")
 
 fes = V * W * M 
 (L, u,uhat),  (G, v, vhat) = fes.TnT()
@@ -155,7 +174,6 @@ def SolveBVP_CR(level, drawResult=False):
         a.Assemble(); a_cr.Assemble()
         # rhs linear form
         f = LinearForm(fes)
-        f.vec.data = helper.getRhs(fes, c_low, testV=v)
 
         mixmass.Assemble()
         fesMass.Assemble()
@@ -218,6 +236,7 @@ def SolveBVP_CR(level, drawResult=False):
         for _ in range(uzawaIt):
             # homo dirichlet BC
             gfu.vec.data[:] = 0
+            uh.Set(uin, definedon=mesh.Boundaries("inlet"))
             rhs = f.vec.CreateVector()
             rhs.data = f.vec - a.mat * gfu.vec
             rhs.data += -b.mat * p_prev.vec
@@ -249,11 +268,10 @@ def SolveBVP_CR(level, drawResult=False):
 
 
 
-# ========= START of CONVERGENCE ORDER CHECK ==========
+# ========= START of MAIN ==========
 SolveBVP = SolveBVP_CR
 print(f'===== DIM: {mesh.dim}, ORDER:{ order} c_low: {c_low}, eps: {epsilon} =====')
 SolveBVP(0, drawResult)
-prev_uErr, prev_LErr = helper.ecrCheck(0, fes, mesh, uh, Lh)
 level = 1
 while True:
     # uniform refinement used, meshRate=2 in ecrCheck
@@ -268,9 +286,8 @@ while True:
     if (sum(W.FreeDofs(True)) + sum(W.FreeDofs(True)) > maxdofs) or level > maxLevel:
         print(f'# global DOFS {sum(W.FreeDofs(True)) + sum(W.FreeDofs(True))}')
         break
+    print(f'===== LEVEL {level} =====')
     SolveBVP(level, drawResult)
-    prev_uErr, prev_LErr = helper.ecrCheck(level, fes, mesh, uh, Lh, meshRate = meshrate, 
-                                           prev_uErr=prev_uErr, prev_LErr=prev_LErr)
     level += 1
 
-# ========= END of CONVERGENCE ORDER CHECK ==========
+# ========= END of MAIN ==========

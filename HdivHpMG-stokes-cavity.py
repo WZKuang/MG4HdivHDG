@@ -11,7 +11,7 @@ from ngsolve.meshes import MakeStructured2DMesh
 from netgen.csg import unit_cube
 # customized functions
 from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
-from mymg import MultiGrid
+from myMG import MultiGrid
 from mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
 from myASP import MultiASP
 
@@ -265,8 +265,8 @@ while True:
         
     # exit if total global dofs exceed a0 tol
     M.Update(); W.Update()
-    if (sum(W.FreeDofs(True)) + sum(W.FreeDofs(True)) > maxdofs):
-        print(f'# global DOFS {sum(W.FreeDofs(True)) + sum(W.FreeDofs(True))} exceed MAX')
+    if (sum(W.FreeDofs(True)) + sum(W.FreeDofs(True)) > maxdofs) or level > maxLevel:
+        print(f'# global DOFS {sum(W.FreeDofs(True)) + sum(W.FreeDofs(True))}')
         break
     print(f'===== LEVEL {level} =====')
     SolveBVP(level, drawResult)
