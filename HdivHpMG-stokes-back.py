@@ -35,6 +35,7 @@ drawResult = False
 
 # ========== START of MESH and BC==========
 L = 4
+dirichBDs = "wall|inlet"
 if dim == 2:
     ## Backwards-facing step flow geo
     geo = SplineGeometry()
@@ -71,9 +72,9 @@ def tang(v):
         return v - (v*n)*n
 # ========== START of CR MG SETUP for P-MG ==========
 # # ========= Crouzeix-Raviart scheme =========
-W0 = HDiv(mesh, order=0, RT=True, dirichlet="wall|inlet") if mesh.dim == 2 \
-     else HDiv(mesh, order=0, dirichlet="wall|inlet")
-V_cr = FESpace('nonconforming', mesh, dirichlet="wall|inlet")
+W0 = HDiv(mesh, order=0, RT=True, dirichlet=dirichBDs) if mesh.dim == 2 \
+     else HDiv(mesh, order=0, dirichlet=dirichBDs)
+V_cr = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
 if mesh.dim == 2:
     fes_cr = V_cr * V_cr
     (ux_cr, uy_cr), (vx_cr, vy_cr) = fes_cr.TnT()
@@ -119,11 +120,11 @@ with TaskManager():
 # ========= mixed-HidvHDG scheme =========
 V = MatrixValued(L2(mesh, order=order), mesh.dim, False)
 if mesh.dim == 2:
-    W = HDiv(mesh, order=order, RT=True, dirichlet="wall|inlet")
+    W = HDiv(mesh, order=order, RT=True, dirichlet=dirichBDs)
 elif mesh.dim == 3:
     W = HDiv(mesh, order=order, 
-             RT=True if order>=1 else False, dirichlet=".*") # inconsistent option when lowest order
-M = TangentialFacetFESpace(mesh, order=order, dirichlet="wall|inlet")
+             RT=True if order>=1 else False, dirichlet=dirichBDs) # inconsistent option when lowest order
+M = TangentialFacetFESpace(mesh, order=order, dirichlet=dirichBDs)
 
 fes = V * W * M 
 (L, u,uhat),  (G, v, vhat) = fes.TnT()
