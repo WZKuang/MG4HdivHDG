@@ -7,8 +7,8 @@ import time as timeit
 from ngsolve.krylovspace import CGSolver
 from ngsolve.la import EigenValues_Preconditioner
 # geometry
-from ngsolve.meshes import MakeStructured2DMesh
-from netgen.csg import unit_cube
+from ngsolve.meshes import MakeStructured2DMesh, MakeStructured3DMesh
+# from netgen.csg import unit_cube
 # customized functions
 from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
 from myMG import MultiGrid
@@ -27,9 +27,9 @@ order = int(sys.argv[4])
 if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
-iniN = 2 if dim == 2 else 1
+iniN = 2
 maxdofs = 5e7
-maxLevel = 5
+maxLevel = 4
 epsilon = 1e-8
 uzawaIt = 1
 drawResult = False
@@ -37,7 +37,7 @@ drawResult = False
 # ========== START of MESH and EXACT SOLUTION ==========
 dirichBDs = ".*"
 mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN) if dim == 2 \
-       else Mesh(unit_cube.GenerateMesh(maxh=1/iniN))
+       else MakeStructured3DMesh(hexes=False, nx=iniN, ny=iniN, nz=iniN)
 helper = stokesHelper(dim)
 helper.squareSolInit()
 u_exact, _, _ = helper.getExactSol()
@@ -123,7 +123,8 @@ a += (1/epsilon * div(u) * div(v)) * dx
 a += (InnerProduct(L, G) + c_low * u * v
       -InnerProduct(gradu, G) + InnerProduct(L, gradv)) * dx
 a += (tang(u-uhat) * tang(G*n) - tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
-
+# rhs linear form
+f = helper.getRhs(fes, c_low, v)
 # L2 projection from fes0 to fes
 mixmass = BilinearForm(trialspace=fes_cr, testspace=fes)
 # tangential part
@@ -150,13 +151,13 @@ pMass += p * q * dx
 # ========= START of HP-MG for HIGHER ORDER Hdiv-HDG ==========
 def SolveBVP_CR(level, drawResult=False):
     with TaskManager():
+    # with TaskManager(pajetrace=10**8):
         t0 = timeit.time()
         fes.Update(); fes_cr.Update(); W0.Update()
         gfu.Update()
-        a.Assemble(); a_cr.Assemble()
-        # rhs linear form
-        f = LinearForm(fes)
-        f.vec.data = helper.getRhs(fes, c_low, testV=v)
+        a.Assemble()
+        a_cr.Assemble()
+        f.Assemble()
 
         mixmass.Assemble()
         fesMass.Assemble()
@@ -173,33 +174,44 @@ def SolveBVP_CR(level, drawResult=False):
             # he_prol
             pp.append(a_cr.mat.Inverse(pdofs, inverse="sparsecholesky"))
             # bk smoother
-            # pp.append(VertexPatchBlocks(mesh, fes_cr))
             if dim == 2:
-                pp.append(VertexPatchBlocks(mesh, fes_cr))
+                # vertex block smoothers, if no hacker made to ngsolve source file,
+                # use the following line instead
+                # pp.append(VertexPatchBlocks(mesh, fes_cr))
+                pp.append(fes_cr.CreateSmoothBlocks(vertex=True, globalDofs=False))
             elif dim == 3:
-                pp.append(EdgePatchBlocks(mesh, fes_cr))
+                # edge block smoothers in 3D to save memory, if no hacker made to ngsolve source file,
+                # use the following line instead
+                # pp.append(EdgePatchBlocks(mesh, fes_cr))
+                pp.append(fes_cr.CreateSmoothBlocks(vertex=False, globalDofs=False))
             MG_cr.Update(a_cr.mat, pp)
 
 
-
+ 
         # ========== PRECONDITIONER SETUP START
         if dim == 2:
             fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
         elif dim == 3:
-            fesM_inv = fesMass.mat.CreateBlockSmoother(FacetBlocks(mesh, fes))
-        
+            # facet blocks for mass mat inverse, if no hacker made to ngsolve source file,
+            # use the following line instead
+            # fesM_inv = fesMass.mat.CreateBlockSmoother(FacetBlocks(mesh, fes))
+            fesM_inv = fesMass.mat.CreateBlockSmoother(fes.CreateFacetBlocks(globalDofs=True))
+
         E = fesM_inv @ mixmass.mat # E: fes0 => fes
         ET = mixmass.mat.T @ fesM_inv
-        vblocks = VertexPatchBlocks(mesh, fes)
-        eblocks = EdgePatchBlocks(mesh, fes)
+
+        # block smoothers, if no hacker made to ngsolve source file,
+        # use the following line instead
+        # blocks = VertexPatchBlocks(mesh, fes) if mesh.dim == 2 else EdgePatchBlocks(mesh, fes)
+        blocks = fes.CreateSmoothBlocks(vertex=True, globalDofs=True) if mesh.dim == 2 \
+                 else fes.CreateSmoothBlocks(vertex=False, globalDofs=True)
         
         # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='sparsecholesky')
         inv_cr = MG_cr
         coarse = E @ inv_cr @ ET
 
         pre = MultiASP(a.mat, fes.FreeDofs(True), coarse, 
-                       smoother=a.mat.CreateBlockSmoother(vblocks) if dim==2 
-                                else a.mat.CreateBlockSmoother(eblocks), 
+                       smoother=a.mat.CreateBlockSmoother(blocks), 
                        nSm=0 if order==0 else 1)
         # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
         # pre = R + E @ inv_cr @ ET # additive ASP
@@ -237,9 +249,9 @@ def SolveBVP_CR(level, drawResult=False):
         # ========= PRINT RESULTS
         t2 = timeit.time()
         it //= uzawaIt
-        lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
+        # lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
         print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
-        print(f"==> AVG IT: {it}, N_smooth: {nMGSmooth}, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
+        print(f"==> AVG IT: {it}, N_smooth: {nMGSmooth}") #, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
         if drawResult:
             import netgen.gui
             Draw(Norm(uh), mesh, 'sol')

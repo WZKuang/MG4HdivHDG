@@ -1,2 +1,13 @@
 # pycache directory
 __pycache__
+.ipynb_checkpoints
+# backup files
+backup_*.py
+# testfiles
+test.*
+# trace files
+clearTrace
+*.trace
+ng*.html
+# fil run results for memory usage
+fil-result

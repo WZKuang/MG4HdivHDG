@@ -87,9 +87,7 @@ class stokesHelper:
                     ) * testV[2] * dx
             f += c_low * self.u_exact * testV * dx
         
-        with TaskManager():
-            f.Assemble()
-            return f.vec.data
+        return f
 
     # ========== convergence order check with respect to the exact sol
     def ecrCheck(self, level, fes, mesh, uh, Lh, meshRate=2, prev_uErr=0, prev_LErr=0):

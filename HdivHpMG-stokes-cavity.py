@@ -31,7 +31,7 @@ maxdofs = 5e7
 maxLevel = 5
 epsilon = 1e-8
 uzawaIt = 1
-drawResult = False
+drawResult = True
 
 # ========== START of MESH ==========
 dirichBDs = ".*"
@@ -56,9 +56,10 @@ def tang(v):
 # # ========= Crouzeix-Raviart scheme =========
 W0 = HDiv(mesh, order=0, RT=True, dirichlet=dirichBDs) if mesh.dim == 2 \
      else HDiv(mesh, order=0, dirichlet=dirichBDs)
-V_cr = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
+V_cr1 = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
+V_cr2 = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
 if mesh.dim == 2:
-    fes_cr = V_cr * V_cr
+    fes_cr = FESpace([V_cr1, V_cr2])
     (ux_cr, uy_cr), (vx_cr, vy_cr) = fes_cr.TnT()
 
     u_cr = CF((ux_cr, uy_cr))
@@ -68,7 +69,8 @@ if mesh.dim == 2:
     divU_cr = grad(ux_cr)[0] + grad(uy_cr)[1]
     divV_cr = grad(vx_cr)[0] + grad(vy_cr)[1]
 elif mesh.dim == 3:
-    fes_cr = V_cr * V_cr * V_cr
+    V_cr3 = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
+    fes_cr = FESpace([V_cr1, V_cr2, V_cr3])
     (ux_cr, uy_cr, uz_cr), (vx_cr, vy_cr, vz_cr) = fes_cr.TnT()
 
     u_cr = CF((ux_cr, uy_cr, uz_cr))
@@ -89,7 +91,7 @@ prolVcr = FacetProlongationTrig2(mesh, et) if dim==2 \
           else FacetProlongationTet2(mesh, et)
 with TaskManager():
     a_cr.Assemble()
-    MG_cr = MultiGrid(a_cr.mat, prolVcr, nc=V_cr.ndof,
+    MG_cr = MultiGrid(a_cr.mat, prolVcr, nc=V_cr1.ndof,
                         coarsedofs=fes_cr.FreeDofs(), w1=0.8,
                         nsmooth=nMGSmooth, sm="gs", var=True,
                         he=True, dim=mesh.dim, wcycle=False)
@@ -125,6 +127,8 @@ a += (InnerProduct(L, G) + c_low * u * v
       -InnerProduct(gradu, G) + InnerProduct(L, gradv)) * dx
 a += (tang(u-uhat) * tang(G*n) - tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
 
+f = LinearForm(fes)
+
 # L2 projection from fes0 to fes
 mixmass = BilinearForm(trialspace=fes_cr, testspace=fes)
 # tangential part
@@ -151,12 +155,13 @@ pMass += p * q * dx
 # ========= START of HP-MG for HIGHER ORDER Hdiv-HDG ==========
 def SolveBVP_CR(level, drawResult=False):
     with TaskManager():
+    # with TaskManager(pajetrace=10**8):
         t0 = timeit.time()
         fes.Update(); fes_cr.Update(); W0.Update()
         gfu.Update()
         a.Assemble(); a_cr.Assemble()
         # rhs linear form
-        f = LinearForm(fes)
+        f.Assemble()
 
         mixmass.Assemble()
         fesMass.Assemble()
@@ -164,20 +169,25 @@ def SolveBVP_CR(level, drawResult=False):
         if level > 0:
             et.Update()
             pp = [fes_cr.FreeDofs()]
-            pp.append(V_cr.ndof)
+            pp.append(V_cr1.ndof)
             pdofs = BitArray(fes_cr.ndof)
             pdofs[:] = 0
             inner = prolVcr.GetInnerDofs(level)
             for j in range(mesh.dim):
-                pdofs[j * V_cr.ndof:(j + 1) * V_cr.ndof] = inner
+                pdofs[j * V_cr1.ndof:(j + 1) * V_cr1.ndof] = inner
             # he_prol
             pp.append(a_cr.mat.Inverse(pdofs, inverse="sparsecholesky"))
             # bk smoother
-            pp.append(VertexPatchBlocks(mesh, fes_cr))
-            # if dim == 2:
-            #     pp.append(VertexPatchBlocks(mesh, fes_cr))
-            # elif dim == 3:
-            #     pp.append(EdgePatchBlocks(mesh, fes_cr))
+            if dim == 2:
+                # block smoothers, if no hacker made to ngsolve source file,
+                # use the following line instead
+                # pp.append(VertexPatchBlocks(mesh, fes_cr))
+                pp.append(fes_cr.CreateSmoothBlocks(vertex=True, globalDofs=False))
+            elif dim == 3:
+                # edge block smoothers in 3D to save memory, if no hacker made to ngsolve source file,
+                # use the following line instead
+                # pp.append(EdgePatchBlocks(mesh, fes_cr))
+                pp.append(fes_cr.CreateSmoothBlocks(vertex=False, globalDofs=False))
             MG_cr.Update(a_cr.mat, pp)
 
 
@@ -186,19 +196,26 @@ def SolveBVP_CR(level, drawResult=False):
         if dim == 2:
             fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
         elif dim == 3:
-            fesM_inv = fesMass.mat.CreateBlockSmoother(FacetBlocks(mesh, fes))
+            # facet blocks for mass mat inverse, if no hacker made to ngsolve source file,
+            # use the following line instead
+            # fesM_inv = fesMass.mat.CreateBlockSmoother(FacetBlocks(mesh, fes))
+            fesM_inv = fesMass.mat.CreateBlockSmoother(fes.CreateFacetBlocks(globalDofs=True))
         
         E = fesM_inv @ mixmass.mat # E: fes0 => fes
         ET = mixmass.mat.T @ fesM_inv
-        vblocks = VertexPatchBlocks(mesh, fes)
-        # eblocks = EdgePatchBlocks(mesh, fes)
+
+        # block smoothers, if no hacker made to ngsolve source file,
+        # use the following line instead
+        # blocks = VertexPatchBlocks(mesh, fes) if mesh.dim == 2 else EdgePatchBlocks(mesh, fes)
+        blocks = fes.CreateSmoothBlocks(vertex=True, globalDofs=True) if mesh.dim == 2 \
+                 else fes.CreateSmoothBlocks(vertex=False, globalDofs=True)
         
         # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='sparsecholesky')
         inv_cr = MG_cr
         coarse = E @ inv_cr @ ET
 
         pre = MultiASP(a.mat, fes.FreeDofs(True), coarse, 
-                       smoother=a.mat.CreateBlockSmoother(vblocks), 
+                       smoother=a.mat.CreateBlockSmoother(blocks), 
                        nSm=0 if order==0 else 1)
         # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
         # pre = R + E @ inv_cr @ ET # additive ASP
@@ -237,9 +254,9 @@ def SolveBVP_CR(level, drawResult=False):
         # ========= PRINT RESULTS
         t2 = timeit.time()
         it //= uzawaIt
-        lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
+        # lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
         print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
-        print(f"==> AVG IT: {it}, N_smooth: {nMGSmooth}, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
+        print(f"==> AVG IT: {it}, N_smooth: {nMGSmooth}") #, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
         if drawResult:
             import netgen.gui
             Draw(Norm(uh), mesh, 'sol')
