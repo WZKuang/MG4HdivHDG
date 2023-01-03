@@ -31,7 +31,7 @@ maxdofs = 5e7
 maxLevel = 5
 epsilon = 1e-8
 uzawaIt = 1
-drawResult = True
+drawResult = False
 
 # ========== START of MESH ==========
 dirichBDs = ".*"
@@ -257,6 +257,8 @@ def SolveBVP_CR(level, drawResult=False):
         # lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
         print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
         print(f"==> AVG IT: {it}, N_smooth: {nMGSmooth}") #, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
+        L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
+        print(f'==> uh divErr: {L2_divErr:.1E}')
         if drawResult:
             import netgen.gui
             Draw(Norm(uh), mesh, 'sol')
