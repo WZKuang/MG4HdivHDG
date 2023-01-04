@@ -15,23 +15,25 @@ from myMG import MultiGrid
 from mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
 from myStokesHelper import stokesHelper
 from myASP import MultiASP
+from myIterSolver import IterSolver
 
 import sys
-if len(sys.argv) < 5:
-    print('not enough input args: dim + c_low + nMGSmooth + order'); exit(1)
+if len(sys.argv) < 6:
+    print('not enough input args: dim + c_low + nMGSmooth + order + precond?'); exit(1)
 dim = int(sys.argv[1])
 c_low = int(sys.argv[2])
 nMGSmooth = int(sys.argv[3])
 order = int(sys.argv[4])
+precond = bool(int(sys.argv[5]))
 
 if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
 iniN = 2
 maxdofs = 5e7
-maxLevel = 4
-epsilon = 1e-8
-uzawaIt = 1
+maxLevel = 6
+epsilon = 1e-4
+uzawaIt = 2
 drawResult = False
 
 # ========== START of MESH and EXACT SOLUTION ==========
@@ -237,7 +239,12 @@ def SolveBVP_CR(level, drawResult=False):
             # update L and u
             rhs.data += a.harmonic_extension_trans * rhs
 
-            inv_fes = CGSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
+            if precond:
+                inv_fes = CGSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
+            else:
+                inv_fes = IterSolver(mat=a.mat, pre=pre, printrates=False, tol=1e-8, atol=5e-7,
+                                     maxiter=200, 
+                                     freedofs=fes.FreeDofs(True))
             gfu.vec.data += inv_fes * rhs
             gfu.vec.data += a.harmonic_extension * gfu.vec
             gfu.vec.data += a.inner_solve * rhs
@@ -250,6 +257,7 @@ def SolveBVP_CR(level, drawResult=False):
         t2 = timeit.time()
         it //= uzawaIt
         # lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
+        print(f"==> MG in PCG: {precond}")
         print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
         print(f"==> AVG IT: {it}, N_smooth: {nMGSmooth}") #, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
         if drawResult:

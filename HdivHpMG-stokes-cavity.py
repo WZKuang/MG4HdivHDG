@@ -5,7 +5,7 @@
 from ngsolve import *
 import time as timeit
 from ngsolve.krylovspace import CGSolver
-from ngsolve.la import EigenValues_Preconditioner
+# from ngsolve.la import EigenValues_Preconditioner
 # geometry
 from ngsolve.meshes import MakeStructured2DMesh
 from netgen.csg import unit_cube
