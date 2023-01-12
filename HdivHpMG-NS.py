@@ -27,13 +27,13 @@ if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
 iniN = 2 if dim == 2 else 1
-b = CF((0, 0)) if dim == 2 else CF((0, 0, 0))
-# b = CF((10, 0)) if dim == 2 else CF((10, 0, 0))
+# b = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
+b = CF((1000, 0)) if dim == 2 else CF((1000, 0, 0))
 maxdofs = 5e7
 maxLevel = 5
 epsilon = 1e-8
 uzawaIt = 1
-drawResult = False
+drawResult = True
 
 # ========== START of MESH ==========
 dirichBDs = ".*"
@@ -86,11 +86,16 @@ a_cr = BilinearForm(fes_cr)
 a_cr += (InnerProduct(GradU_cr, GradV_cr) 
         + c_low * Interpolate(u_cr, W0) * Interpolate(v_cr, W0)
         + 1/epsilon * divU_cr * divV_cr) * dx
-# convection part
-if mesh.dim == 2:   
-    a_cr += CF((grad(ux_cr)*b, grad(uy_cr)*b)) * Interpolate(v_cr, W0) * dx
-else:
-    a_cr += CF((grad(ux_cr)*b, grad(uy_cr)*b, grad(uz_cr)*b)) * Interpolate(v_cr, W0) * dx
+# convection part (no stabilization)
+# if mesh.dim == 2:   
+#     a_cr += CF((grad(ux_cr)*b, grad(uy_cr)*b)) * Interpolate(v_cr, W0) * dx
+# else:
+#     a_cr += CF((grad(ux_cr)*b, grad(uy_cr)*b, grad(uz_cr)*b)) * Interpolate(v_cr, W0) * dx
+# convection part (equivalent to Hdiv-HDG upwind)
+ucrjump = IfPos(b*n, b*n* tang(u_cr-Interpolate(u_cr, W0)) * tang(v_cr), 
+                     -b*n* tang(Interpolate(u_cr, W0)-u_cr) * Interpolate(v_cr, W0))    
+a_cr += InnerProduct(grad(Interpolate(u_cr, W0))*b, Interpolate(v_cr, W0))*dx
+a_cr += ucrjump*dx(element_boundary=True)
 
 # # ========== CR MG initialization
 et = meshTopology(mesh, mesh.dim)
