@@ -22,18 +22,20 @@ dim = int(sys.argv[1])
 c_low = int(sys.argv[2])
 nMGSmooth = int(sys.argv[3])
 order = int(sys.argv[4])
-aspIt = 2
 
 if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
 iniN = 2 if dim == 2 else 1
-# b = CF((100, 0)) if dim == 2 else CF((100, 0, 0))
-b = CF((100000, 0)) if dim == 2 else CF((100000, 0, 0))
+b = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
+# b = CF((1e4, 0)) if dim == 2 else CF((1e4, 0, 0))
+# b = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
 maxdofs = 5e7
 maxLevel = 6
-epsilon = 1e-8
-uzawaIt = 1
+nu = 1 # visocity
+epsilon = 1e-4
+uzawaIt = 2
+aspSm = 2
 drawResult = False
 
 # ========== START of MESH ==========
@@ -84,7 +86,7 @@ elif mesh.dim == 3:
     divV_cr = grad(vx_cr)[0] + grad(vy_cr)[1] + grad(vz_cr)[2]
 # bilinear form, equivalent to condensed Hdiv-P0
 a_cr = BilinearForm(fes_cr)
-a_cr += (InnerProduct(GradU_cr, GradV_cr) 
+a_cr += (nu * InnerProduct(GradU_cr, GradV_cr) 
         + c_low * Interpolate(u_cr, W0) * Interpolate(v_cr, W0)
         + 1/epsilon * divU_cr * divV_cr) * dx
 # convection part (no stabilization)
@@ -137,9 +139,9 @@ gradv, gradu = Grad(v), Grad(u)
 a = BilinearForm(fes, symmetric=False, condense=True)
 # volume term
 a += (1/epsilon * div(u) * div(v)) * dx
-a += (InnerProduct(L, G) + c_low * u * v
-      -InnerProduct(gradu, G) + InnerProduct(L, gradv)) * dx
-a += (tang(u-uhat) * tang(G*n) - tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
+a += (nu * InnerProduct(L, G) + c_low * u * v
+      -nu * InnerProduct(gradu, G) + nu * InnerProduct(L, gradv)) * dx
+a += (nu * tang(u-uhat) * tang(G*n) - nu * tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
 # convection part
 uhatup = IfPos(b*n, tang(u), tang(uhat))    
 a += -InnerProduct(gradv*b,u)*dx
@@ -234,7 +236,8 @@ def SolveBVP_CR(level, drawResult=False):
 
         pre = MultiASP(a.mat, fes.FreeDofs(True), coarse, 
                        smoother=a.mat.CreateBlockSmoother(blocks), 
-                       nSm=0 if order==0 else aspIt)
+                       nSm=0 if order==0 else aspSm
+                    )
         # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
         # pre = R + E @ inv_cr @ ET # additive ASP
         t1 = timeit.time()
