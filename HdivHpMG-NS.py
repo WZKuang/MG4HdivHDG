@@ -22,18 +22,19 @@ dim = int(sys.argv[1])
 c_low = int(sys.argv[2])
 nMGSmooth = int(sys.argv[3])
 order = int(sys.argv[4])
+aspIt = 2
 
 if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
 iniN = 2 if dim == 2 else 1
-# b = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
-b = CF((1000, 0)) if dim == 2 else CF((1000, 0, 0))
+# b = CF((100, 0)) if dim == 2 else CF((100, 0, 0))
+b = CF((100000, 0)) if dim == 2 else CF((100000, 0, 0))
 maxdofs = 5e7
-maxLevel = 5
+maxLevel = 6
 epsilon = 1e-8
 uzawaIt = 1
-drawResult = True
+drawResult = False
 
 # ========== START of MESH ==========
 dirichBDs = ".*"
@@ -93,7 +94,7 @@ a_cr += (InnerProduct(GradU_cr, GradV_cr)
 #     a_cr += CF((grad(ux_cr)*b, grad(uy_cr)*b, grad(uz_cr)*b)) * Interpolate(v_cr, W0) * dx
 # convection part (equivalent to Hdiv-HDG upwind)
 ucrjump = IfPos(b*n, b*n* tang(u_cr-Interpolate(u_cr, W0)) * tang(v_cr), 
-                     -b*n* tang(Interpolate(u_cr, W0)-u_cr) * Interpolate(v_cr, W0))    
+                     -b*n* tang(Interpolate(u_cr, W0)-u_cr) * tang(Interpolate(v_cr, W0)))    
 a_cr += InnerProduct(grad(Interpolate(u_cr, W0))*b, Interpolate(v_cr, W0))*dx
 a_cr += ucrjump*dx(element_boundary=True)
 
@@ -233,7 +234,7 @@ def SolveBVP_CR(level, drawResult=False):
 
         pre = MultiASP(a.mat, fes.FreeDofs(True), coarse, 
                        smoother=a.mat.CreateBlockSmoother(blocks), 
-                       nSm=0 if order==0 else 1)
+                       nSm=0 if order==0 else aspIt)
         # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
         # pre = R + E @ inv_cr @ ET # additive ASP
         t1 = timeit.time()
@@ -302,12 +303,13 @@ while True:
         mesh.Refine(onlyonce = True); meshrate = sqrt(2)
         
     # exit if total global dofs exceed a0 tol
-    M.Update(); W.Update()
-    if (sum(W.FreeDofs(True)) + sum(W.FreeDofs(True)) > maxdofs) or level > maxLevel:
-        print(f'# global DOFS {sum(W.FreeDofs(True)) + sum(W.FreeDofs(True))}')
+    M.Update(); W.Update(); fes.Update()
+    globalDofs = sum(W.FreeDofs(True)) + sum(M.FreeDofs(True))
+    if globalDofs > maxdofs or level > maxLevel:
+        print(f'# totalDofs: {fes.ndof} # global DOFS {globalDofs}')
         break
     print(f'===== LEVEL {level} =====')
-    print(f'# global DOFS {sum(W.FreeDofs(True)) + sum(W.FreeDofs(True))}')
+    print(f'# totalDofs: {fes.ndof} # global DOFS {globalDofs}')
     SolveBVP(level, drawResult)
     print(f'======================')
     level += 1

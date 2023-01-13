@@ -299,11 +299,13 @@ while True:
         mesh.Refine(onlyonce = True); meshrate = sqrt(2)
         
     # exit if total global dofs exceed a0 tol
-    M.Update(); W.Update()
-    if (sum(W.FreeDofs(True)) + sum(W.FreeDofs(True)) > maxdofs) or level > maxLevel:
+    M.Update(); W.Update(); fes.Update()
+    globalDofs = sum(W.FreeDofs(True)) + sum(M.FreeDofs(True))
+    if globalDofs > maxdofs or level > maxLevel:
+        print(f'# totalDofs: {fes.ndof} # global DOFS {globalDofs}')
         break
     print(f'===== LEVEL {level} =====')
-    print(f'# global DOFS {sum(W.FreeDofs(True)) + sum(W.FreeDofs(True))}')
+    print(f'# totalDofs: {fes.ndof} # global DOFS {globalDofs}')
     SolveBVP(level, drawResult)
     print(f'======================')
     level += 1
