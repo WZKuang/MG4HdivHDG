@@ -1,13 +1,14 @@
 # mixed Hdiv-HDG for Stokes, hp-MG preconditioned CG solver
 # Augmented Lagrangian Uzawa iteration for outer iteration
 # Lid-driven cavity problem
-# TODO: Convection part!!!
+
 from ngsolve import *
 import time as timeit
 from ngsolve.krylovspace import CGSolver, GMResSolver
 # from ngsolve.la import EigenValues_Preconditioner
 # geometry
 from ngsolve.meshes import MakeStructured2DMesh
+from netgen.geom2d import unit_square
 from netgen.csg import unit_cube
 # customized functions
 from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
@@ -27,12 +28,14 @@ if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
 iniN = 2 if dim == 2 else 1
-b = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
-# b = CF((1e4, 0)) if dim == 2 else CF((1e4, 0, 0))
+# b = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
+b = CF((2, -1)) if dim == 2 else CF((2, -1, 0))
 # b = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
+# NOTE: the larger Re number is, the more sensitive to mesh direction w.r.t. wind direction???
+bonusOrder = 2 * order + 3
 maxdofs = 5e7
-maxLevel = 6
-nu = 1 # visocity
+maxLevel = 7
+nu = 5e-4 # visocity
 epsilon = 1e-4
 uzawaIt = 2
 aspSm = 2
@@ -42,6 +45,7 @@ drawResult = False
 dirichBDs = ".*"
 if dim == 2:
     mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
+    # mesh = Mesh(unit_square.GenerateMesh(maxh=1/iniN))
     # top side dirichlet bd
     utop = CoefficientFunction((4*x*(1-x),0))
 elif dim == 3:
@@ -97,8 +101,8 @@ a_cr += (nu * InnerProduct(GradU_cr, GradV_cr)
 # convection part (equivalent to Hdiv-HDG upwind)
 ucrjump = IfPos(b*n, b*n* tang(u_cr-Interpolate(u_cr, W0)) * tang(v_cr), 
                      -b*n* tang(Interpolate(u_cr, W0)-u_cr) * tang(Interpolate(v_cr, W0)))    
-a_cr += InnerProduct(grad(Interpolate(u_cr, W0))*b, Interpolate(v_cr, W0))*dx
-a_cr += ucrjump*dx(element_boundary=True)
+a_cr += InnerProduct(grad(Interpolate(u_cr, W0))*b, Interpolate(v_cr, W0))*dx(bonus_intorder=4)
+a_cr += ucrjump*dx(element_boundary=True, bonus_intorder=5)
 
 # # ========== CR MG initialization
 et = meshTopology(mesh, mesh.dim)
@@ -144,8 +148,8 @@ a += (nu * InnerProduct(L, G) + c_low * u * v
 a += (nu * tang(u-uhat) * tang(G*n) - nu * tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
 # convection part
 uhatup = IfPos(b*n, tang(u), tang(uhat))    
-a += -InnerProduct(gradv*b,u)*dx
-a += b*n*(uhatup*tang(v-vhat))*dx(element_boundary=True)
+a += -InnerProduct(gradv*b,u)*dx(bonus_intorder=bonusOrder)
+a += b*n*(uhatup*tang(v-vhat))*dx(element_boundary=True, bonus_intorder=bonusOrder)
 
 f = LinearForm(fes)
 
@@ -236,8 +240,7 @@ def SolveBVP_CR(level, drawResult=False):
 
         pre = MultiASP(a.mat, fes.FreeDofs(True), coarse, 
                        smoother=a.mat.CreateBlockSmoother(blocks), 
-                       nSm=0 if order==0 else aspSm
-                    )
+                       nSm=0 if order==0 else aspSm)
         # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
         # pre = R + E @ inv_cr @ ET # additive ASP
         t1 = timeit.time()
