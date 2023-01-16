@@ -12,9 +12,9 @@ from netgen.geom2d import unit_square
 from netgen.csg import unit_cube
 # customized functions
 from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
-from myMG import MultiGrid
-from mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
-from myASP import MultiASP
+from auxPyFiles.myMG import MultiGrid
+from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
+from auxPyFiles.myASP import MultiASP
 
 import sys
 if len(sys.argv) < 5:
@@ -29,14 +29,14 @@ if dim != 2 and dim != 3:
 
 iniN = 2 if dim == 2 else 1
 # wind = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
-# wind = CF((2, -1)) if dim == 2 else CF((2, -1, 0))
-wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
+wind = CF((2, -1)) if dim == 2 else CF((2, -1, 0))
+# wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
 """
 NOTE: the larger Re number is, the more sensitive to mesh direction w.r.t. wind direction???
 """
 bonusOrder = 2 * order + 3
 maxdofs = 5e7
-maxLevel = 6
+maxLevel = 7
 nu = 1e-4 # visocity
 
 epsilon = 1e-4
