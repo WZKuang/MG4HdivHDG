@@ -22,7 +22,6 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
     """
     NOTE: the larger Re number is, the more sensitive to mesh direction w.r.t. wind direction???
     """
-    bonusOrder = 2 * order + 3
     maxdofs = 5e7
 
     epsilon = 1e-4
@@ -52,6 +51,8 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
     # # ========= Crouzeix-Raviart scheme =========
     W0 = HDiv(mesh, order=0, RT=True, dirichlet=dirichBDs) if mesh.dim == 2 \
         else HDiv(mesh, order=0, dirichlet=dirichBDs)
+    M0 = TangentialFacetFESpace(mesh, order=0, dirichlet=dirichBDs)
+
     V_cr1 = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
     V_cr2 = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
     if mesh.dim == 2:
@@ -80,17 +81,22 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
     a_cr += (nu * InnerProduct(GradU_cr, GradV_cr) 
             + c_low * Interpolate(u_cr, W0) * Interpolate(v_cr, W0)
             + 1/epsilon * divU_cr * divV_cr) * dx
-    # convection part (no stabilization)
+    # ===== convection part (no stabilization)
     # if mesh.dim == 2:   
     #     a_cr += CF((grad(ux_cr)*b, grad(uy_cr)*b)) * Interpolate(v_cr, W0) * dx
     # else:
     #     a_cr += CF((grad(ux_cr)*b, grad(uy_cr)*b, grad(uz_cr)*b)) * Interpolate(v_cr, W0) * dx
-    # convection part (equivalent to Hdiv-HDG upwind)
-    uhatup = IfPos(wind*n, tang(Interpolate(u_cr, W0)), tang(u_cr))    
-    a_cr += -InnerProduct(Grad(Interpolate(v_cr, W0))*wind, Interpolate(u_cr, W0))*dx(bonus_intorder=bonusOrder)
-    a_cr += wind*n*(uhatup*tang(Interpolate(v_cr, W0)-v_cr))*dx(element_boundary=True, bonus_intorder=bonusOrder)  
-
-    # # ========== CR MG initialization
+    # ==== convection part (equivalent to Hdiv-HDG upwind)
+    # wind_proj = GridFunction(W0)
+    # wind_proj.Set(wind)
+    # uhatup = IfPos(wind_proj*n, tang(Interpolate(u_cr, W0)), Interpolate(u_cr, M0)) 
+    uhatup = IfPos(wind*n, tang(Interpolate(u_cr, W0)),Interpolate(u_cr, M0))    
+    a_cr += -InnerProduct(Grad(Interpolate(v_cr, W0))*wind, 
+                               Interpolate(u_cr, W0))*dx(bonus_intorder=2*order+4)
+    a_cr += wind*n*(uhatup*tang(Interpolate(v_cr, W0)
+                    -Interpolate(v_cr, M0)))*dx(element_boundary=True, bonus_intorder=2*order+5)  
+    
+    # ========== CR MG initialization
     et = meshTopology(mesh, mesh.dim)
     et.Update()
     prolVcr = FacetProlongationTrig2(mesh, et) if dim==2 \
@@ -134,8 +140,8 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
     a += (nu * tang(u-uhat) * tang(G*n) - nu * tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
     # convection part
     uhatup = IfPos(wind*n, tang(u), tang(uhat))    
-    a += -InnerProduct(gradv*wind,u)*dx(bonus_intorder=bonusOrder)
-    a += wind*n*(uhatup*tang(v-vhat))*dx(element_boundary=True, bonus_intorder=bonusOrder)   
+    a += -InnerProduct(gradv*wind,u)*dx(bonus_intorder=2*order+4)
+    a += wind*n*(uhatup*tang(v-vhat))*dx(element_boundary=True, bonus_intorder=2*order+5)   
 
     f = LinearForm(fes)
 
@@ -167,8 +173,10 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
         with TaskManager():
         # with TaskManager(pajetrace=10**8):
             t0 = timeit.time()
-            fes.Update(); fes_cr.Update(); W0.Update()
+            fes.Update(); fes_cr.Update(); 
+            W0.Update(); M0.Update()
             gfu.Update()
+            # wind_proj.Update(); wind_proj.Set(wind)
             a.Assemble(); a_cr.Assemble()
             # rhs linear form
             f.Assemble()
@@ -257,6 +265,8 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
                 rhs.data += a.harmonic_extension_trans * rhs
 
                 inv_fes = GMResSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
+                # inv_fes = GMResSolver(a.mat, a.mat.Inverse(fes.FreeDofs(True), inverse='umfpack'), 
+                #                       printrates=False, tol=1e-8, maxiter=500)
                 # inv_fes = a.mat.Inverse(fes.FreeDofs(True), inverse='umfpack')
                 gfu.vec.data += inv_fes * rhs
                 gfu.vec.data += a.harmonic_extension * gfu.vec
@@ -325,11 +335,16 @@ order = int(sys.argv[4])
 if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
-# wind = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
-wind = CF((0, -1)) if dim == 2 else CF((0, -1, 0))
+wind = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
+# wind = CF((0, 0)) if dim == 2 else CF((0, 0, 0))
 # wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
-nu = 1e-4 # visocity
+# nuList = [1, 1e-2, 1e-3, 1e-4] # visocity
+nuList = [1e-4] # visocity
 aspSm = 4
 
-HdivHDGOseen(dim=dim, nu=nu, wind=wind, c_low=c_low, 
-             order=order, nMGSmooth=nMGSmooth, aspSm=4, drawResult=False, maxLevel=7)
+for nu in nuList:
+    HdivHDGOseen(dim=dim, nu=nu, wind=wind, c_low=c_low, 
+                order=order, nMGSmooth=nMGSmooth, aspSm=4, drawResult=False, maxLevel=7)
+    print("================================================================")
+    print("================================================================")
+    print("================================================================")
