@@ -1,4 +1,4 @@
-# mixed Hdiv-HDG for Stokes, hp-MG preconditioned CG solver
+# mixed Hdiv-HDG for Oseen problms, hp-MG preconditioned GMRES solver
 # Augmented Lagrangian Uzawa iteration for outer iteration
 # Lid-driven cavity problem
 
@@ -28,17 +28,20 @@ if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
 iniN = 2 if dim == 2 else 1
-# b = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
-b = CF((2, -1)) if dim == 2 else CF((2, -1, 0))
-# b = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
-# NOTE: the larger Re number is, the more sensitive to mesh direction w.r.t. wind direction???
+# wind = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
+# wind = CF((2, -1)) if dim == 2 else CF((2, -1, 0))
+wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
+"""
+NOTE: the larger Re number is, the more sensitive to mesh direction w.r.t. wind direction???
+"""
 bonusOrder = 2 * order + 3
 maxdofs = 5e7
-maxLevel = 7
-nu = 5e-4 # visocity
+maxLevel = 6
+nu = 1e-4 # visocity
+
 epsilon = 1e-4
 uzawaIt = 2
-aspSm = 2
+aspSm = 4
 drawResult = False
 
 # ========== START of MESH ==========
@@ -99,10 +102,9 @@ a_cr += (nu * InnerProduct(GradU_cr, GradV_cr)
 # else:
 #     a_cr += CF((grad(ux_cr)*b, grad(uy_cr)*b, grad(uz_cr)*b)) * Interpolate(v_cr, W0) * dx
 # convection part (equivalent to Hdiv-HDG upwind)
-ucrjump = IfPos(b*n, b*n* tang(u_cr-Interpolate(u_cr, W0)) * tang(v_cr), 
-                     -b*n* tang(Interpolate(u_cr, W0)-u_cr) * tang(Interpolate(v_cr, W0)))    
-a_cr += InnerProduct(grad(Interpolate(u_cr, W0))*b, Interpolate(v_cr, W0))*dx(bonus_intorder=4)
-a_cr += ucrjump*dx(element_boundary=True, bonus_intorder=5)
+uhatup = IfPos(wind*n, tang(Interpolate(u_cr, W0)), tang(u_cr))    
+a_cr += -InnerProduct(Grad(Interpolate(v_cr, W0))*wind, Interpolate(u_cr, W0))*dx(bonus_intorder=bonusOrder)
+a_cr += wind*n*(uhatup*tang(Interpolate(v_cr, W0)-v_cr))*dx(element_boundary=True, bonus_intorder=bonusOrder)  
 
 # # ========== CR MG initialization
 et = meshTopology(mesh, mesh.dim)
@@ -147,9 +149,9 @@ a += (nu * InnerProduct(L, G) + c_low * u * v
       -nu * InnerProduct(gradu, G) + nu * InnerProduct(L, gradv)) * dx
 a += (nu * tang(u-uhat) * tang(G*n) - nu * tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
 # convection part
-uhatup = IfPos(b*n, tang(u), tang(uhat))    
-a += -InnerProduct(gradv*b,u)*dx(bonus_intorder=bonusOrder)
-a += b*n*(uhatup*tang(v-vhat))*dx(element_boundary=True, bonus_intorder=bonusOrder)
+uhatup = IfPos(wind*n, tang(u), tang(uhat))    
+a += -InnerProduct(gradv*wind,u)*dx(bonus_intorder=bonusOrder)
+a += wind*n*(uhatup*tang(v-vhat))*dx(element_boundary=True, bonus_intorder=bonusOrder)   
 
 f = LinearForm(fes)
 
@@ -200,7 +202,7 @@ def SolveBVP_CR(level, drawResult=False):
             for j in range(mesh.dim):
                 pdofs[j * V_cr1.ndof:(j + 1) * V_cr1.ndof] = inner
             # he_prol
-            pp.append(a_cr.mat.Inverse(pdofs, inverse="sparsecholesky"))
+            pp.append(a_cr.mat.Inverse(pdofs, inverse="umfpack"))
             # bk smoother
             if dim == 2:
                 # block smoothers, if no hacker made to ngsolve source file,
@@ -234,7 +236,11 @@ def SolveBVP_CR(level, drawResult=False):
         blocks = fes.CreateSmoothBlocks(vertex=True, globalDofs=True) if mesh.dim == 2 \
                  else fes.CreateSmoothBlocks(vertex=False, globalDofs=True)
         
-        # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='sparsecholesky')
+        """
+        NOTE: the increase of iteration count w.r.t. poly degree is mainly from Hdiv-HDG part.
+              could be due to the smoother???
+        """
+        # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='umfpack')
         inv_cr = MG_cr
         coarse = E @ inv_cr @ ET
 
@@ -297,7 +303,7 @@ def SolveBVP_CR(level, drawResult=False):
 
 # ========= START of MAIN ==========
 SolveBVP = SolveBVP_CR
-print(f'===== DIM: {mesh.dim}, ORDER:{ order} c_low: {c_low}, eps: {epsilon} =====')
+print(f'===== DIM: {mesh.dim}, ORDER:{ order}, nu: {nu:.2e} c_low: {c_low}, eps: {epsilon:.2e} =====')
 SolveBVP(0, drawResult)
 level = 1
 while True:

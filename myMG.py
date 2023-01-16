@@ -22,7 +22,7 @@ class MultiGrid(BaseMatrix):
         self.dim = dim
         self.nactive = [nc]
         self.nlevels = 0
-        self.invcoarseproblem = mat.Inverse(coarsedofs, inverse="sparsecholesky")
+        self.invcoarseproblem = mat.Inverse(coarsedofs, inverse="umfpack")
         # self.invcoarseproblem = mat.Inverse(coarsedofs, inverse="pardiso")
 
     def Update(self, mat, pp):
