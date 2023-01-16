@@ -1,9 +1,14 @@
-# hp-MG PCs for the H(div)-HDG for the NS Equations
+# hp-MG methods for the H(div)-HDG for the incompressible flow problems
+Paper link: TO BE FILLED.
+
 A proceeding work of our previous study on [optimal geometric h-MG for HDG-P0 for the reaction-diffusion and the generalized Stokes equations](https://arxiv.org/abs/2208.14418).
 
-Augmented Lagrangian (AL) Uzawa iteration method is used to solve the mixed H(div)-HDG scheme for the NS equation.
-We firsly proved the equivalence between the lowest-order mixed H(div)-HDG scheme and the well-established Crouzeix-Raviart elements. Then we naturally proposed a geometric *h*-MG preconditioners robust to the mesh size *h* and AL parameter lambda of the lowest-order scheme, basded on the Ph.D. thesis of Joachim Schöberl (1999).
-Then the geometric h-MG of the lowest-order scheme is used as the coarse solver in a multiplicative p-MG of the higher-order scheme, with robustness with respect to polynomial order.
+Augmented Lagrangian (AL) Uzawa iteration method is used to solve the mixed H(div)-HDG scheme for the generalized Stokes and NS equations.
+
+We firsly proved the equivalence between the lowest-order mixed H(div)-HDG scheme and the well-established Crouzeix-Raviart elements for the generalized Stokes equations. Then we naturally proposed a geometric *h*-MG method robust to the mesh size *h* and AL parameter *lambda* of the lowest-order scheme for the generalized Stokes equations, basded on the Ph.D. thesis of Joachim Schöberl (1999).
+Then the geometric h-MG of the lowest-order scheme is used as the coarse solver in a multiplicative p-MG of the higher-order H(div)-HDG scheme for the generalized Stokes equations, with robustness with respect to polynomial order demonstrated in the numerical experiments.
+
+The developed hp-MG method for the generalized Stokes equatsions is then extended to the NS equations with an upwind convection term, and numerical experiments are performed.
 
 ## Some Hackers to NGSolve Source Files:
 1. Make the public parameter "print" of class "FESpace" usable in Python coding.
