@@ -1,4 +1,4 @@
-# mixed Hdiv-HDG for Oseen problms, hp-MG preconditioned GMRES solver
+# mixed Hdiv-HDG for 2D benchmark Oseen problms, hp-MG preconditioned GMRES solver
 # Augmented Lagrangian Uzawa iteration for outer iteration
 # Lid-driven cavity problem
 
@@ -9,36 +9,32 @@ from ngsolve.krylovspace import CGSolver, GMResSolver
 # geometry
 from ngsolve.meshes import MakeStructured2DMesh
 from netgen.geom2d import unit_square
-from netgen.csg import unit_cube
+# from netgen.csg import unit_cube
 # customized functions
-from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
+from prol import meshTopology, FacetProlongationTrig2 #, FacetProlongationTet2
 from auxPyFiles.myMG import MultiGrid
-from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
+# from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
 from auxPyFiles.myASP import MultiASP
 
 
 def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0, 
                  order=0, nMGSmooth=2, aspSm=4, drawResult=False, maxLevel=7):
-    """
-    NOTE: the larger Re number is, the more sensitive to mesh direction w.r.t. wind direction???
-    """
+                 
     maxdofs = 5e7
 
-    epsilon = 1e-4
+    epsilon = 1/nu
+    # epsilon = 1e-4
+    # import math
+    # uzawaIt = int(-math.log10(1e-8)/-math.log10(epsilon))
     uzawaIt = 2
-
-    iniN = 2 if dim == 2 else 1
+    iniN = 1
 
     # ========== START of MESH ==========
     dirichBDs = ".*"
-    if dim == 2:
-        mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
-        # mesh = Mesh(unit_square.GenerateMesh(maxh=1/iniN))
-        # top side dirichlet bd
-        utop = CoefficientFunction((4*x*(1-x),0))
-    elif dim == 3:
-        mesh = Mesh(unit_cube.GenerateMesh(maxh=1/iniN))
-        utop = CoefficientFunction((16*x*(1-x)*y*(1-y),0,0))
+    mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
+    # mesh = Mesh(unit_square.GenerateMesh(maxh=1/iniN))
+    # top side dirichlet bd
+    utop = CoefficientFunction((4*x*(1-x),0))
     # ========== END of MESH ==========
 
 
@@ -47,79 +43,38 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
     h = specialcf.mesh_size
     def tang(v):
             return v - (v*n)*n
-    # ========== START of CR MG SETUP for P-MG ==========
-    # # ========= Crouzeix-Raviart scheme =========
-    W0 = HDiv(mesh, order=0, RT=True, dirichlet=dirichBDs) if mesh.dim == 2 \
-        else HDiv(mesh, order=0, dirichlet=dirichBDs)
+
+
+
+    # ========= START of P0 Hdiv-HDG SCHEME TO BE SOLVED ==========
+    # ========= mixed-HidvHDG scheme =========
+    V0 = MatrixValued(L2(mesh, order=0), mesh.dim, False)
+    W0 = HDiv(mesh, order=0, RT=True, dirichlet=dirichBDs)
     M0 = TangentialFacetFESpace(mesh, order=0, dirichlet=dirichBDs)
 
-    V_cr1 = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
-    V_cr2 = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
-    if mesh.dim == 2:
-        fes_cr = FESpace([V_cr1, V_cr2])
-        (ux_cr, uy_cr), (vx_cr, vy_cr) = fes_cr.TnT()
+    fes0 = V0 * W0 * M0 
+    (L0, u0,uhat0),  (G0, v0, vhat0) = fes0.TnT()
 
-        u_cr = CF((ux_cr, uy_cr))
-        v_cr = CF((vx_cr, vy_cr))
-        GradU_cr = CF((grad(ux_cr), grad(uy_cr)))
-        GradV_cr = CF((grad(vx_cr), grad(vy_cr)))
-        divU_cr = grad(ux_cr)[0] + grad(uy_cr)[1]
-        divV_cr = grad(vx_cr)[0] + grad(vy_cr)[1]
-    elif mesh.dim == 3:
-        V_cr3 = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
-        fes_cr = FESpace([V_cr1, V_cr2, V_cr3])
-        (ux_cr, uy_cr, uz_cr), (vx_cr, vy_cr, vz_cr) = fes_cr.TnT()
+    # gradient by row
+    gradv0, gradu0 = Grad(v0), Grad(u0)
 
-        u_cr = CF((ux_cr, uy_cr, uz_cr))
-        v_cr = CF((vx_cr, vy_cr, vz_cr))
-        GradU_cr = CF((grad(ux_cr), grad(uy_cr), grad(uz_cr)))
-        GradV_cr = CF((grad(vx_cr), grad(vy_cr), grad(vz_cr)))
-        divU_cr = grad(ux_cr)[0] + grad(uy_cr)[1] + grad(uz_cr)[2]
-        divV_cr = grad(vx_cr)[0] + grad(vy_cr)[1] + grad(vz_cr)[2]
-    # bilinear form, equivalent to condensed Hdiv-P0
-    a_cr = BilinearForm(fes_cr)
-    a_cr += (nu * InnerProduct(GradU_cr, GradV_cr) 
-            + c_low * Interpolate(u_cr, W0) * Interpolate(v_cr, W0)
-            + 1/epsilon * divU_cr * divV_cr) * dx
-    # ===== convection part (no stabilization)
-    # if mesh.dim == 2:   
-    #     a_cr += CF((grad(ux_cr)*b, grad(uy_cr)*b)) * Interpolate(v_cr, W0) * dx
-    # else:
-    #     a_cr += CF((grad(ux_cr)*b, grad(uy_cr)*b, grad(uz_cr)*b)) * Interpolate(v_cr, W0) * dx
-    # ==== convection part (equivalent to Hdiv-HDG upwind)
-    # wind_proj = GridFunction(W0)
-    # wind_proj.Set(wind)
-    # uhatup = IfPos(wind_proj*n, tang(Interpolate(u_cr, W0)), Interpolate(u_cr, M0)) 
-    uhatup = IfPos(wind*n, tang(Interpolate(u_cr, W0)),Interpolate(u_cr, M0))    
-    a_cr += -InnerProduct(Grad(Interpolate(v_cr, W0))*wind, 
-                               Interpolate(u_cr, W0))*dx(bonus_intorder=2*order+4)
-    a_cr += wind*n*(uhatup*tang(Interpolate(v_cr, W0)
-                    -Interpolate(v_cr, M0)))*dx(element_boundary=True, bonus_intorder=2*order+5)  
-    
-    # ========== CR MG initialization
-    et = meshTopology(mesh, mesh.dim)
-    et.Update()
-    prolVcr = FacetProlongationTrig2(mesh, et) if dim==2 \
-            else FacetProlongationTet2(mesh, et)
-    with TaskManager():
-        a_cr.Assemble()
-        MG_cr = MultiGrid(a_cr.mat, prolVcr, nc=V_cr1.ndof,
-                            coarsedofs=fes_cr.FreeDofs(), w1=0.8,
-                            nsmooth=nMGSmooth, sm="gs", var=True,
-                            he=True, dim=mesh.dim, wcycle=False)
-
-    # ========== END of CR MG SETUP for P-MG ==========
-
+    # bilinear form of SIP-HdivHDG
+    a0 = BilinearForm(fes0, symmetric=False, condense=True)
+    # volume term
+    a0 += (1/epsilon * div(u0) * div(v0)) * dx
+    a0 += (nu * InnerProduct(L0, G0) + c_low * u0 * v0
+        -nu * InnerProduct(gradu0, G0) + nu * InnerProduct(L0, gradv0)) * dx
+    a0 += (nu * tang(u0-uhat0) * tang(G0*n) - nu * tang(L0*n) * tang(v0-vhat0))*dx(element_boundary=True)
+    # === convection part
+    uhatup0 = IfPos(wind*n, tang(u0), tang(uhat0))    
+    a0 += -InnerProduct(gradv0 * wind, u0)*dx(bonus_intorder=3)
+    a0 += wind*n*(uhatup0*tang(v0-vhat0))*dx(element_boundary=True, bonus_intorder=3)   
 
 
     # ========= START of HIGHER ORDER Hdiv-HDG SCHEME TO BE SOLVED ==========
     # ========= mixed-HidvHDG scheme =========
     V = MatrixValued(L2(mesh, order=order), mesh.dim, False)
-    if mesh.dim == 2:
-        W = HDiv(mesh, order=order, RT=True, dirichlet=dirichBDs)
-    elif mesh.dim == 3:
-        W = HDiv(mesh, order=order, 
-                RT=True if order>=1 else False, dirichlet=dirichBDs) # inconsistent option when lowest order
+    W = HDiv(mesh, order=order, RT=True, dirichlet=dirichBDs)
     M = TangentialFacetFESpace(mesh, order=order, dirichlet=dirichBDs)
 
     fes = V * W * M 
@@ -138,19 +93,48 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
     a += (nu * InnerProduct(L, G) + c_low * u * v
         -nu * InnerProduct(gradu, G) + nu * InnerProduct(L, gradv)) * dx
     a += (nu * tang(u-uhat) * tang(G*n) - nu * tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
-    # convection part
+    # === convection part
     uhatup = IfPos(wind*n, tang(u), tang(uhat))    
-    a += -InnerProduct(gradv*wind,u)*dx(bonus_intorder=2*order+4)
-    a += wind*n*(uhatup*tang(v-vhat))*dx(element_boundary=True, bonus_intorder=2*order+5)   
-
+    a += -InnerProduct(gradv*wind, u)*dx(bonus_intorder=3)
+    a += wind*n*(uhatup*tang(v-vhat))*dx(element_boundary=True, bonus_intorder=3)   
+    
     f = LinearForm(fes)
 
-    # L2 projection from fes0 to fes
-    mixmass = BilinearForm(trialspace=fes_cr, testspace=fes)
+
+    # ============== TRANSFER OPERATORS
+    # === L2 projection from CR to fes0, for prolongation operator
+    V_cr1 = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
+    V_cr2 = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
+    fes_cr = FESpace([V_cr1, V_cr2])
+    (ux_cr, uy_cr), (vx_cr, vy_cr) = fes_cr.TnT()
+    u_cr, v_cr = CF((ux_cr, uy_cr)), CF((vx_cr, vy_cr))
+
+    mixmass0 = BilinearForm(trialspace=fes_cr, testspace=fes0)
     # tangential part
-    mixmass += tang(u_cr) * tang(vhat) * dx(element_boundary=True)
+    mixmass0 += tang(u_cr) * tang(vhat0) * dx(element_boundary=True)
     # normal part
-    mixmass += (u_cr*n) * (v*n) * dx(element_boundary=True)
+    mixmass0 += (u_cr*n) * (v0*n) * dx(element_boundary=True)
+
+    fesMass0 = BilinearForm(fes0)
+    fesMass0 += tang(uhat0) * tang(vhat0) * dx(element_boundary=True)
+    fesMass0 += (u0*n) * (v0*n) * dx(element_boundary=True)
+    
+    # === L2 projection from fes0 to CR, for prolongation operator
+    ir = IntegrationRule(SEGM, 1)
+    mixmass_cr = BilinearForm(trialspace=fes0, testspace=fes_cr)
+    mixmass_cr += tang(uhat0) * tang(v_cr) * dx(element_boundary=True, intrules={SEGM: ir})
+    mixmass_cr += u0*n * v_cr*n * dx(element_boundary=True, intrules={SEGM: ir})
+
+    fesMass_cr = BilinearForm(fes_cr)
+    fesMass_cr += tang(u_cr) * tang(v_cr) * dx(element_boundary=True, intrules={SEGM: ir})
+    fesMass_cr += u_cr*n * v_cr*n * dx(element_boundary=True, intrules={SEGM: ir})
+
+    # === L2 projection from fes0 to fes
+    mixmass = BilinearForm(trialspace=fes0, testspace=fes)
+    # tangential part
+    mixmass += tang(uhat0) * tang(vhat) * dx(element_boundary=True)
+    # normal part
+    mixmass += (u0*n) * (v*n) * dx(element_boundary=True)
 
     fesMass = BilinearForm(fes)
     fesMass += tang(uhat) * tang(vhat) * dx(element_boundary=True)
@@ -166,78 +150,83 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
     pMass += p * q * dx
     # ========= END of HIGHER ORDER Hdiv-HDG SCHEME TO BE SOLVED ==========
 
+    et = meshTopology(mesh, mesh.dim)
+    et.Update() 
+    prol = FacetProlongationTrig2(mesh, et) # for CR element
+
+    
 
 
     # ========= START of HP-MG for HIGHER ORDER Hdiv-HDG ==========
-    def SolveBVP_CR(level, drawResult=False):
+    def SolveBVP_CR(level, drawResult=False, MG0=None):
         with TaskManager():
         # with TaskManager(pajetrace=10**8):
             t0 = timeit.time()
-            fes.Update(); fes_cr.Update(); 
-            W0.Update(); M0.Update()
+            fes.Update(); fes0.Update(); fes_cr.Update()
             gfu.Update()
             # wind_proj.Update(); wind_proj.Set(wind)
-            a.Assemble(); a_cr.Assemble()
+            a.Assemble(); a0.Assemble()
             # rhs linear form
             f.Assemble()
 
-            mixmass.Assemble()
-            fesMass.Assemble()
-            # # ========== CR MG update
-            if level > 0:
+            fesMass.Assemble(); mixmass.Assemble()
+            fesMass0.Assemble(); mixmass0.Assemble()
+            fesMass_cr.Assemble(); mixmass_cr.Assemble()
+
+            fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
+            fesM0_inv = fesMass0.mat.CreateSmoother(fes0.FreeDofs(True))
+            fesMass_cr_inv = fesMass_cr.mat.CreateSmoother(fes_cr.FreeDofs())
+
+            E = fesM_inv @ mixmass.mat # E: fes0 => fes
+            ET = mixmass.mat.T @ fesM_inv
+
+            cr2fes0 = fesM0_inv @ mixmass0.mat # cr2fes0: fes_cr => fes0
+            fes02cr = fesMass_cr_inv @ mixmass_cr.mat
+
+
+            # ========== MG initialize and update
+            if level == 0:
+                MG0 = MultiGrid(a0.mat, prol, nc=V_cr1.ndof,
+                    coarsedofs=fes0.FreeDofs(True), w1=0.8,
+                    nsmooth=nMGSmooth, sm="gs", var=True,
+                    he=True, dim=mesh.dim, wcycle=False,
+                    mProject = [cr2fes0, fes02cr])
+            else:
+                if MG0 is None: 
+                    print("WRONG MG0 INPUT"); exit(1)
                 et.Update()
-                pp = [fes_cr.FreeDofs()]
+                pp = [fes0.FreeDofs(True)]
                 pp.append(V_cr1.ndof)
-                pdofs = BitArray(fes_cr.ndof)
+                pdofs = BitArray(fes0.ndof)
                 pdofs[:] = 0
-                inner = prolVcr.GetInnerDofs(level)
-                for j in range(mesh.dim):
-                    pdofs[j * V_cr1.ndof:(j + 1) * V_cr1.ndof] = inner
+                inner = prol.GetInnerDofs(level)
+                pdofs[V0.ndof: V0.ndof+W0.ndof] = inner
+                pdofs[V0.ndof+W0.ndof: ] = inner
                 # he_prol
-                pp.append(a_cr.mat.Inverse(pdofs, inverse="umfpack"))
-                # bk smoother
-                if dim == 2:
-                    # block smoothers, if no hacker made to ngsolve source file,
-                    # use the following line instead
-                    # pp.append(VertexPatchBlocks(mesh, fes_cr))
-                    pp.append(fes_cr.CreateSmoothBlocks(vertex=True, globalDofs=False))
-                elif dim == 3:
-                    # edge block smoothers in 3D to save memory, if no hacker made to ngsolve source file,
-                    # use the following line instead
-                    # pp.append(EdgePatchBlocks(mesh, fes_cr))
-                    pp.append(fes_cr.CreateSmoothBlocks(vertex=False, globalDofs=False))
-                MG_cr.Update(a_cr.mat, pp)
+                """ TODO: fix inner inverse!!!
+                """
+                pp.append(a0.mat.Inverse(pdofs, inverse="umfpack"))
+                pp.append([cr2fes0, fes02cr])
+                # block smoothers, if no hacker made to ngsolve source file,
+                # use the following line instead
+                # pp.append(VertexPatchBlocks(mesh, fes_cr))
+                pp.append(fes0.CreateSmoothBlocks(vertex=True, globalDofs=True))
+                MG0.Update(a0.mat, pp)
 
 
 
             # ========== PRECONDITIONER SETUP START
-            if dim == 2:
-                fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
-            elif dim == 3:
-                # facet blocks for mass mat inverse, if no hacker made to ngsolve source file,
-                # use the following line instead
-                # fesM_inv = fesMass.mat.CreateBlockSmoother(FacetBlocks(mesh, fes))
-                fesM_inv = fesMass.mat.CreateBlockSmoother(fes.CreateFacetBlocks(globalDofs=True))
-            
-            E = fesM_inv @ mixmass.mat # E: fes0 => fes
-            ET = mixmass.mat.T @ fesM_inv
 
             # block smoothers, if no hacker made to ngsolve source file,
             # use the following line instead
             # blocks = VertexPatchBlocks(mesh, fes) if mesh.dim == 2 else EdgePatchBlocks(mesh, fes)
-            blocks = fes.CreateSmoothBlocks(vertex=True, globalDofs=True) if mesh.dim == 2 \
-                    else fes.CreateSmoothBlocks(vertex=False, globalDofs=True)
+            fesBlocks = fes.CreateSmoothBlocks(vertex=True, globalDofs=True)
             
-            """
-            NOTE: the increase of iteration count w.r.t. poly degree is mainly from Hdiv-HDG part.
-                could be due to the smoother???
-            """
-            # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='umfpack')
-            inv_cr = MG_cr
-            coarse = E @ inv_cr @ ET
-
-            pre = MultiASP(a.mat, fes.FreeDofs(True), coarse, 
-                        smoother=a.mat.CreateBlockSmoother(blocks), 
+            # inv0 = a0.mat.Inverse(fes0.FreeDofs(True))
+            inv0 = MG0
+            lowOrderSolver = E @ inv0 @ ET
+            pre = MultiASP(a.mat, fes.FreeDofs(True), lowOrderSolver, 
+                        smoother=a.mat.CreateBlockSmoother(fesBlocks), 
                         nSm=0 if order==0 else aspSm)
             # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
             # pre = R + E @ inv_cr @ ET # additive ASP
@@ -266,7 +255,7 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
 
                 inv_fes = GMResSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
                 # inv_fes = GMResSolver(a.mat, a.mat.Inverse(fes.FreeDofs(True), inverse='umfpack'), 
-                #                       printrates=False, tol=1e-8, maxiter=500)
+                                    #   printrates=False, tol=1e-8, maxiter=500)
                 # inv_fes = a.mat.Inverse(fes.FreeDofs(True), inverse='umfpack')
                 gfu.vec.data += inv_fes * rhs
                 gfu.vec.data += a.harmonic_extension * gfu.vec
@@ -282,13 +271,14 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
             it //= uzawaIt
             # lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
             print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
-            print(f"==> AVG IT: {it}, N_smooth: {nMGSmooth}") #, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
+            print(f"==> AVG MG IT: {it}, Uzawa It: {uzawaIt}, MG_smooth: {nMGSmooth}")#, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
             L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
             print(f'==> uh divErr: {L2_divErr:.1E}')
             if drawResult:
                 import netgen.gui
                 Draw(Norm(uh), mesh, 'sol')
                 input('continue?')
+            return MG0
 
     # ========= END of HP-MG for HIGHER ORDER Hdiv-HDG ==========
 
@@ -296,16 +286,12 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
 
 
     # ========= START of OUTPUT ==========
-    print(f'===== DIM: {mesh.dim}, ORDER:{ order}, nu: {nu:.2e} c_low: {c_low}, eps: {epsilon:.2e} =====')
-    SolveBVP_CR(0, drawResult)
+    print(f'===== DIM: {mesh.dim}, ORDER:{order}, nu: {nu:.1e} c_low: {c_low}, eps: {epsilon:.1e} =====')
+    MG0 = SolveBVP_CR(0, drawResult)
     level = 1
     while True:
-        # # uniform refinement used, meshRate=2 in ecrCheck
-        # mesh.ngmesh.Refine(); meshrate = 2
-        if mesh.dim == 2:
-            mesh.ngmesh.Refine(); meshrate = 2
-        else:
-            mesh.Refine(onlyonce = True); meshrate = sqrt(2)
+        # uniform refinement used
+        mesh.ngmesh.Refine()
             
         # exit if total global dofs exceed a0 tol
         M.Update(); W.Update(); fes.Update()
@@ -315,7 +301,7 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
             break
         print(f'===== LEVEL {level} =====')
         print(f'# totalDofs: {fes.ndof} # global DOFS {globalDofs}')
-        SolveBVP_CR(level, drawResult)
+        MG0 = SolveBVP_CR(level, drawResult, MG0)
         print(f'======================')
         level += 1
 
@@ -332,19 +318,19 @@ c_low = int(sys.argv[2])
 nMGSmooth = int(sys.argv[3])
 order = int(sys.argv[4])
 
-if dim != 2 and dim != 3:
-    print('WRONG DIMENSION!'); exit(1)
+if dim != 2:
+    print('WRONG DIMENSION! 2D ONLY!!!'); exit(1)
 
-wind = CF((1, 0)) if dim == 2 else CF((1, 0, 0))
-# wind = CF((0, 0)) if dim == 2 else CF((0, 0, 0))
-# wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
-# nuList = [1, 1e-2, 1e-3, 1e-4] # visocity
+# wind = CF((1, 0))
+# wind = CF((0, 0))
+wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
+# nuList = [1e-2, 5e-3, 1e-3, 5e-4] # visocity
 nuList = [1e-4] # visocity
-aspSm = 4
+aspSm = 2
 
 for nu in nuList:
     HdivHDGOseen(dim=dim, nu=nu, wind=wind, c_low=c_low, 
-                order=order, nMGSmooth=nMGSmooth, aspSm=4, drawResult=False, maxLevel=7)
+                order=order, nMGSmooth=nMGSmooth, aspSm=aspSm, drawResult=False, maxLevel=8)
     print("================================================================")
     print("================================================================")
     print("================================================================")

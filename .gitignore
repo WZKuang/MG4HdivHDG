@@ -4,7 +4,7 @@ __pycache__
 # backup files
 backup_*.py
 # testfiles
-test.*
+test*
 # trace files
 clearTrace
 *.trace
