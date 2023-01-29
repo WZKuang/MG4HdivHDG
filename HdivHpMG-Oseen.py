@@ -22,11 +22,11 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
                  
     maxdofs = 5e7
 
-    epsilon = 1/nu
-    # epsilon = 1e-4
+    epsilon = 1/nu * 5e-2
+    # epsilon = 1
     # import math
     # uzawaIt = int(-math.log10(1e-8)/-math.log10(epsilon))
-    uzawaIt = 2
+    uzawaIt = 1
     iniN = 1
 
     # ========== START of MESH ==========
@@ -67,8 +67,8 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
     a0 += (nu * tang(u0-uhat0) * tang(G0*n) - nu * tang(L0*n) * tang(v0-vhat0))*dx(element_boundary=True)
     # === convection part
     uhatup0 = IfPos(wind*n, tang(u0), tang(uhat0))    
-    a0 += -InnerProduct(gradv0 * wind, u0)*dx(bonus_intorder=3)
-    a0 += wind*n*(uhatup0*tang(v0-vhat0))*dx(element_boundary=True, bonus_intorder=3)   
+    a0 += -gradv0 * wind * u0 *dx(bonus_intorder=3)
+    a0 += wind*n * (uhatup0 * tang(v0-vhat0)) * dx(element_boundary=True, bonus_intorder=3)   
 
 
     # ========= START of HIGHER ORDER Hdiv-HDG SCHEME TO BE SOLVED ==========
@@ -95,8 +95,8 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
     a += (nu * tang(u-uhat) * tang(G*n) - nu * tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
     # === convection part
     uhatup = IfPos(wind*n, tang(u), tang(uhat))    
-    a += -InnerProduct(gradv*wind, u)*dx(bonus_intorder=3)
-    a += wind*n*(uhatup*tang(v-vhat))*dx(element_boundary=True, bonus_intorder=3)   
+    a += -gradv * wind * u * dx(bonus_intorder=3)
+    a += wind*n * (uhatup * tang(v-vhat)) * dx(element_boundary=True, bonus_intorder=3)   
     
     f = LinearForm(fes)
 
@@ -226,7 +226,7 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
             inv0 = MG0
             lowOrderSolver = E @ inv0 @ ET
             pre = MultiASP(a.mat, fes.FreeDofs(True), lowOrderSolver, 
-                        smoother=a.mat.CreateBlockSmoother(fesBlocks), 
+                        smoother=a.mat.CreateBlockSmoother(fesBlocks),
                         nSm=0 if order==0 else aspSm)
             # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
             # pre = R + E @ inv_cr @ ET # additive ASP
@@ -271,7 +271,8 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
             it //= uzawaIt
             # lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
             print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
-            print(f"==> AVG MG IT: {it}, Uzawa It: {uzawaIt}, MG_smooth: {nMGSmooth}")#, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
+            print(f"==> AVG MG IT: {it}, Uzawa It: {uzawaIt}, MG_smooth: {nMGSmooth}, ASP_smooth: {aspSm}")
+                  #, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
             L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
             print(f'==> uh divErr: {L2_divErr:.1E}')
             if drawResult:
