@@ -188,8 +188,8 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
             if level == 0:
                 MG0 = MultiGrid(a0.mat, prol, nc=V_cr1.ndof,
                     coarsedofs=fes0.FreeDofs(True), w1=0.8,
-                    nsmooth=nMGSmooth, sm="gs", var=True,
-                    he=True, dim=mesh.dim, wcycle=False,
+                    nsmooth=nMGSmooth, sm='gs',#'jc', 
+                    he=True, dim=mesh.dim, wcycle=False, var=True,
                     mProject = [cr2fes0, fes02cr])
             else:
                 if MG0 is None: 
@@ -210,7 +210,14 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
                 # block smoothers, if no hacker made to ngsolve source file,
                 # use the following line instead
                 # pp.append(VertexPatchBlocks(mesh, fes_cr))
-                pp.append(fes0.CreateSmoothBlocks(vertex=True, globalDofs=True))
+                
+                fes0Blocks = fes0.CreateSmoothBlocks(vertex=True, globalDofs=True)
+                # === block GS as MG smoother, not good with nu/1/epsilon ratio
+                pp.append(fes0Blocks)
+                # === GMRES (pre=block jacobi) as multi-ASP smoother, as in Farrell etc., SJSC(2019)
+                # === NOTE: needs to change MG0 "sm='jc'"
+                # === NOTE: not good results
+                # pp.append(GMResSolver(a0.mat, a0.mat.CreateBlockSmoother(fes0Blocks), printrates=False, maxiter=6))
                 MG0.Update(a0.mat, pp)
 
 
@@ -227,9 +234,17 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
             lowOrderSolver = E @ inv0 @ ET
             """TODO: a good smoother for p-MG/h-MG robust w.r.t. mu. GMRES as prc as in Farrell's paper???
             """
+            # === block GS smoother as multi-ASP smoother, not good with nu/1/epsilon ratio
+            aspSmoother = a.mat.CreateBlockSmoother(fesBlocks)
             pre = MultiASP(a.mat, fes.FreeDofs(True), lowOrderSolver, 
-                        smoother=a.mat.CreateBlockSmoother(fesBlocks),
-                        nSm=0 if order==0 else aspSm, smType="jc")
+                        smoother=aspSmoother,
+                        nSm=0 if order==0 else aspSm)
+            # === GMRES (pre=block jacobi) as multi-ASP smoother, as in Farrell etc., SJSC(2019)
+            # === NOTE: seems to not work for higher-order
+            # aspSmoother = GMResSolver(a.mat, a.mat.CreateBlockSmoother(fesBlocks), printrates=False, maxiter=6)
+            # pre = MultiASP(a.mat, fes.FreeDofs(True), lowOrderSolver, 
+            #             smoother=aspSmoother,
+            #             nSm=0 if order==0 else aspSm, smType="jc", damp=1)
             # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
             # pre = R + E @ inv_cr @ ET # additive ASP
             t1 = timeit.time()
@@ -333,7 +348,7 @@ nuList = [1e-4] # visocity
 
 for nu in nuList:
     HdivHDGOseen(dim=dim, nu=nu, wind=wind, c_low=c_low, 
-                order=order, nMGSmooth=nMGSmooth, aspSm=aspSm, drawResult=False, maxLevel=8)
+                order=order, nMGSmooth=nMGSmooth, aspSm=aspSm, drawResult=False, maxLevel=7)
     print("================================================================")
     print("================================================================")
     print("================================================================")
