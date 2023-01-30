@@ -225,9 +225,11 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
             # inv0 = a0.mat.Inverse(fes0.FreeDofs(True))
             inv0 = MG0
             lowOrderSolver = E @ inv0 @ ET
+            """TODO: a good smoother for p-MG/h-MG robust w.r.t. mu. GMRES as prc as in Farrell's paper???
+            """
             pre = MultiASP(a.mat, fes.FreeDofs(True), lowOrderSolver, 
                         smoother=a.mat.CreateBlockSmoother(fesBlocks),
-                        nSm=0 if order==0 else aspSm)
+                        nSm=0 if order==0 else aspSm, smType="jc")
             # R = SymmetricGS(a.mat.CreateBlockSmoother(vblocks)) # block GS for p-MG smoothing
             # pre = R + E @ inv_cr @ ET # additive ASP
             t1 = timeit.time()
@@ -311,13 +313,14 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
 
 
 import sys
-if len(sys.argv) < 5:
-    print('not enough input args: dim + c_low + nMGSmooth + order'); exit(1)
+if len(sys.argv) < 6:
+    print('not enough input args: dim + c_low + nMGSmooth + nASPSmooth + order'); exit(1)
     
 dim = int(sys.argv[1])
 c_low = int(sys.argv[2])
 nMGSmooth = int(sys.argv[3])
-order = int(sys.argv[4])
+aspSm = int(sys.argv[4])
+order = int(sys.argv[5])
 
 if dim != 2:
     print('WRONG DIMENSION! 2D ONLY!!!'); exit(1)
@@ -327,7 +330,6 @@ if dim != 2:
 wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
 # nuList = [1e-2, 5e-3, 1e-3, 5e-4] # visocity
 nuList = [1e-4] # visocity
-aspSm = 2
 
 for nu in nuList:
     HdivHDGOseen(dim=dim, nu=nu, wind=wind, c_low=c_low, 

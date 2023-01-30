@@ -7,13 +7,15 @@ import numpy as np
 
 # multigrid with variable smoothing
 class MultiASP(BaseMatrix):
-    def __init__ (self, mat, activeDOFs, coarseSolver, smoother, nSm=1):
+    def __init__ (self, mat, activeDOFs, coarseSolver, smoother, nSm=1, smType="gs", damp=0.5):
         super().__init__()
         self.mat = mat
         self.activeDOFs = activeDOFs
         self.coarseSol = coarseSolver
         self.sm = smoother # assumed GS
         self.nSm = nSm
+        self.smType = smType
+        self.damp = damp
 
     def Height(self):
         return self.mat.height
@@ -27,10 +29,16 @@ class MultiASP(BaseMatrix):
         residual = b.CreateVector()
         correction = b.CreateVector() # auxiliary space correction
 
-        # ========== pre-smoothing: GS assumed
-        for i in range(self.nSm):
-            self.sm.Smooth(rho, b)
-        residual.data = b - self.mat * rho
+        # ========== pre-smoothing
+        if self.smType == "gs":
+            for _ in range(self.nSm):
+                self.sm.Smooth(rho, b)
+            residual.data = b - self.mat * rho
+        else: # Jacobi, additive
+            residual.data = b
+            for _ in range(self.nSm):
+                rho.data += self.damp * self.sm * residual
+                residual.data = b - self.mat * rho
 
         # ========== coarse grid correction
         # Projector project out inactive dofs on fine level
@@ -41,6 +49,12 @@ class MultiASP(BaseMatrix):
         
         rho.data += correction
     
-        # ========== post-smoothing: GS assumed
-        for i in range(self.nSm):
-            self.sm.SmoothBack(rho, b)
+        # ========== post-smoothing
+        if self.smType == "gs":
+            for _ in range(self.nSm):
+                self.sm.SmoothBack(rho, b)
+        else: # Jacobi, additive
+            for _ in range(self.nSm):
+                residual.data = b - self.mat * rho
+                rho.data += self.damp * self.sm * residual
+                
