@@ -4,7 +4,7 @@
 
 from ngsolve import *
 import time as timeit
-from ngsolve.krylovspace import CGSolver, GMResSolver
+from ngsolve.krylovspace import CGSolver, GMResSolver, GMRes
 # from ngsolve.la import EigenValues_Preconditioner
 # geometry
 from ngsolve.meshes import MakeStructured2DMesh
@@ -17,18 +17,22 @@ from auxPyFiles.myMG import MultiGrid
 from auxPyFiles.myASP import MultiASP
 
 
-def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0, 
-                 order=0, nMGSmooth=2, aspSm=4, drawResult=False, maxLevel=7):
+def HdivHDGOseen(dim=2, iniN=4, nu=1e-3, wind=CF((1, 0)), c_low=0, initialSol=None, epsilon=1e-6,
+                 order=0, nMGSmooth=2, aspSm=4, drawResult=False, maxLevel=7, printIter=True):
                  
     maxdofs = 5e7
-
-    epsilon = 1/nu * 5e-2
-    # epsilon = 1e-2
-    # import math    
-    # uzawaIt = int(-math.log10(1e-8)/-math.log10(epsilon))
+    if drawResult:
+        import netgen.gui
+    ''' TODO: ratio between nu/1/epsilon??????
+        NOTE: when c_low == 0:
+              1. When epsilon is large (O(10)*nu), not necessarily need harmonic extension
+              2. The advection-dominated advection-diffusion term alone (epsilon->infty)
+                 is not well-preconditioned by conventional CR MG (averaging) with/without
+                 harmonic extension.
+              3. p-MG can explode when nu -> 0.
+                 
+    ''' 
     uzawaIt = 1
-    iniN = 1
-
     # ========== START of MESH ==========
     dirichBDs = ".*"
     mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
@@ -155,8 +159,7 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
     prol = FacetProlongationTrig2(mesh, et) # for CR element
 
     
-
-
+    gfuList = []
     # ========= START of HP-MG for HIGHER ORDER Hdiv-HDG ==========
     def SolveBVP_CR(level, drawResult=False, MG0=None):
         with TaskManager():
@@ -268,30 +271,41 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
                 # update L and u
                 rhs.data += a.harmonic_extension_trans * rhs
 
-                inv_fes = GMResSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
-                # inv_fes = GMResSolver(a.mat, a.mat.Inverse(fes.FreeDofs(True), inverse='umfpack'), 
-                                    #   printrates=False, tol=1e-8, maxiter=500)
-                # inv_fes = a.mat.Inverse(fes.FreeDofs(True), inverse='umfpack')
-                gfu.vec.data += inv_fes * rhs
+                if initialGuess is None:
+                    inv_fes = GMResSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
+                    gfu.vec.data += inv_fes * rhs
+                    it += inv_fes.iterations
+                else:
+                    # inv_fes = GMResSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
+                    solTmp = gfu.vec.CreateVector()
+                    solTmp.data = Projector(fes.FreeDofs(True), True) * initialGuess[level]
+                    # inv_fes.Mult(rhs, solTmp, init=False)
+                    _, curIt = GMRes(a.mat, rhs, pre=pre, x=solTmp, maxsteps=500, tol=1e-8, # tol is defined as absolute here
+                                     printrates=False)
+                    gfu.vec.data += solTmp
+                    it += curIt
+
                 gfu.vec.data += a.harmonic_extension * gfu.vec
                 gfu.vec.data += a.inner_solve * rhs
                 # update pressure
                 p_prev.vec.data += 1/epsilon * (pMass_inv @ b.mat.T * gfu.vec.data)
-                it += inv_fes.iterations
-                # it += 1
 
 
             # ========= PRINT RESULTS
             t2 = timeit.time()
             it //= uzawaIt
             # lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
-            print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
-            print(f"==> AVG MG IT: {it}, Uzawa It: {uzawaIt}, MG_smooth: {nMGSmooth}, ASP_smooth: {aspSm}")
-                  #, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
-            L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
-            print(f'==> uh divErr: {L2_divErr:.1E}')
+            globalSol = gfu.vec.CreateVector()
+            globalSol.data = gfu.vec.data
+            gfuList.append(globalSol.data)
+
+            if printIter:
+                print(f"==> Assemble & Update: {t1-t0:.2e}, Solve: {t2-t1:.2e}")
+                print(f"==> AVG MG IT: {it}, Uzawa It: {uzawaIt}, MG_smooth: {nMGSmooth}, ASP_smooth: {aspSm}")
+                    #, MAX LAM: {max(lams):.2e}, MIN LAM: {min(lams):.2e}, COND: {max(lams)/min(lams):.2E}")
+                L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
+                print(f'==> uh divErr: {L2_divErr:.1E}')
             if drawResult:
-                import netgen.gui
                 Draw(Norm(uh), mesh, 'sol')
                 input('continue?')
             return MG0
@@ -320,8 +334,9 @@ def HdivHDGOseen(dim=2, nu=1e-3, wind=CF((1, 0)), c_low=0,
         MG0 = SolveBVP_CR(level, drawResult, MG0)
         print(f'======================')
         level += 1
-
     # ========= END of OUTPUT ==========
+    # return results to be used as initial guess
+    return gfuList
 
 
 
@@ -341,12 +356,26 @@ if dim != 2:
 # wind = CF((1, 0))
 # wind = CF((0, 0))
 wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
+initialSol = False
+maxLevel = 6
+iniN = 2
 # nuList = [1e-2, 5e-3, 1e-3, 5e-4] # visocity
-nuList = [1e-4] # visocity
+nuList = [1e-3] # visocity
 
 for nu in nuList:
-    HdivHDGOseen(dim=dim, nu=nu, wind=wind, c_low=c_low, 
-                order=order, nMGSmooth=nMGSmooth, aspSm=aspSm, drawResult=False, maxLevel=7)
+    initialGuess = None
+    epsilon = 1/nu * 1e-6
+    if initialSol:
+    # stokes first, to get initial guess at each level
+        initialGuess = HdivHDGOseen(dim=dim, iniN=iniN, nu=nu*5, wind=wind, c_low=c_low, epsilon=epsilon,
+                    order=order, nMGSmooth=nMGSmooth, aspSm=aspSm, drawResult=False, maxLevel=maxLevel, printIter=False)
+        print("=============INITIAL STOKES SOLs READY==================")
+        print("==========================================================")
+    print("=================OSEEN MG SOLs START HERE===================")
+    # oseenEps = 1/nu * 5e-2
+    # oseenEps = 1e-6
+    HdivHDGOseen(dim=dim, iniN=iniN, nu=nu, wind=wind, c_low=c_low, initialSol=initialGuess, epsilon=epsilon,  
+                order=order, nMGSmooth=nMGSmooth, aspSm=aspSm, drawResult=False, maxLevel=maxLevel)
     print("================================================================")
     print("================================================================")
     print("================================================================")

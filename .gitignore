@@ -11,5 +11,6 @@ clearTrace
 ng*.html
 # fil run results for memory usage
 fil-result
-
+# reference files
+ref_*
 hiptmairEg
