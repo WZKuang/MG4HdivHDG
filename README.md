@@ -146,3 +146,17 @@ void NonconformingFESpace :: GetFaceDofNrs (int fanr, Array<DofId> & dnums) cons
   }
 ```
 
+## Some Hackers to NGSolve Library Files:
+
+1. In ngsolve.krylovspace (krylovspace.py), alter the default value of "initialization" in linear solver to be False, such that initial guess can be readily used in function "GMRes" without initialization.
+```Python
+# line 76
+def Solve(self, rhs : BaseVector, sol : Optional[BaseVector] = None, initialize : bool = False) -> BaseVector:
+```
+
+2. In ngsolve.krylovspace (krylovspace.py), change the return value of the function "GMRes" s.t. the iteration count is returned.
+```Python
+# Line 891
+return (solver.Solve(rhs=b, sol=x), solver.iterations)
+```
+
