@@ -209,8 +209,8 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=CF((0, 0)),
         E = fesM_inv @ mixmass.mat # E: fes0 => fes
         ET = mixmass.mat.T @ fesM_inv
 
-        inv0 = a0.mat.Inverse(fes0.FreeDofs(True))
-        # inv0 = MG0
+        # inv0 = a0.mat.Inverse(fes0.FreeDofs(True))
+        inv0 = MG0
         lowOrderSolver = E @ inv0 @ ET
         # ========== Multi-ASP operator
         # block smoothers, if no hacker made to ngsolve source file,
@@ -233,7 +233,7 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=CF((0, 0)),
     t1 = timeit.time()
     print(f"===> Oseen Operator Finished: {t1-t0:.2e}")
 
-    return mesh, fes, a, f, pre_ASP, b, pMass_inv
+    return mesh, et, fes, a, f, pre_ASP, b, pMass_inv
 
 
 
@@ -258,12 +258,12 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
     print("#########################################################################")
     
     
-    # wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
-    wind = CF((0, 0))
-    mesh, fes, a, f, pre_ASP, b, pMass_inv = \
+    wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
+    # wind = CF((0, 0))
+    mesh, et, fes, a, f, pre_ASP, b, pMass_inv = \
                 OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=wind, 
-                    c_low=0, epsilon=epsilon,order=order, 
-                    nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel)
+                                c_low=0, epsilon=epsilon,order=order, 
+                                nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel)
 
     # ========== HDG STATIC CONDENSATION and SOLVED by AL uzawa
     Q = L2(mesh, order=order)
@@ -282,9 +282,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
     rhs.data += -b.mat * p_prev.vec
     # # static condensation
     rhs.data += a.harmonic_extension_trans * rhs
-    # inv_fes = GMResSolver(a.mat, pre_ASP, printrates=False, tol=1e-8, maxiter=200)
-    # pre_ASP = a.mat.Inverse(fes.FreeDofs(True), inverse='umfpack')
-    inv_fes = CGSolver(a.mat, pre_ASP, printrates=False, tol=1e-8, maxiter=200)
+    inv_fes = GMResSolver(a.mat, pre_ASP, printrates=False, tol=1e-8, maxiter=200)
     gfu.vec.data += inv_fes * rhs
     it = inv_fes.iterations
 
@@ -302,5 +300,5 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         input('continue?')
 
 
-nsSolver(dim=2, iniN=1, nu=1, div_penalty=1e8,
-         order=0, nMGSmooth=2, aspSm=2, maxLevel=5, drawResult=False)
+nsSolver(dim=2, iniN=1, nu=1e-3, div_penalty=1e6,
+         order=0, nMGSmooth=2, aspSm=2, maxLevel=6, drawResult=False)
