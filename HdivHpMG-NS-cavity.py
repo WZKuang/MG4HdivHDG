@@ -4,23 +4,22 @@
 
 from ngsolve import *
 import time as timeit
-from ngsolve.krylovspace import GMResSolver, GMRes, CGSolver
-# from ngsolve.la import EigenValues_Preconditioner
+from ngsolve.krylovspace import GMResSolver
 # geometry
 from ngsolve.meshes import MakeStructured2DMesh, MakeStructured3DMesh
 # from netgen.geom2d import unit_square
 # from netgen.csg import unit_cube
 # customized functions
-from prol import meshTopology, FacetProlongationTrig2 #, FacetProlongationTet2
+from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
 from auxPyFiles.myMG import MultiGrid
 # from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
 from auxPyFiles.myASP import MultiASP
-
+import math
 
 
 # For each linearized Oseen problem, needs nested MG preconditioner 
 # for the lowest order case.
-def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=CF((0, 0)), 
+def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None, 
                    c_low:int=0, epsilon:float=1e-6,
                    order:int=0, nMGSmooth:int=2, aspSm:int=4, maxLevel:int=7):
     # ========== START of MESH ==========
@@ -31,7 +30,8 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=CF((0, 0)),
         mesh = MakeStructured3DMesh(hexes=False, nx=iniN, ny=iniN, nz=iniN)
     # ========== END of MESH ==========
 
-
+    if wind is None:
+        wind = CF((0, 0)) if dim == 2 else CF((0, 0, 0))
     n = specialcf.normal(mesh.dim)
     def tang(v):
             return v - (v*n)*n
@@ -147,7 +147,8 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=CF((0, 0)),
     # ========= prolongation operators for CR
     et = meshTopology(mesh, mesh.dim)
     et.Update() 
-    prol = FacetProlongationTrig2(mesh, et) # for CR element
+    prol = FacetProlongationTrig2(mesh, et) if dim==2 \
+           else FacetProlongationTet2(mesh, et) # for CR element
 
     t0 = timeit.time()
     MG0 = None
@@ -231,8 +232,8 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=CF((0, 0)),
     
     # ========= END of Operators Assembling ==========
     t1 = timeit.time()
-    print(f"===> Oseen Operator Finished: {t1-t0:.2e}")
-
+    # NOTE: MeshTopology needed to be returned together with
+    #       MG0, otherwise segmentation error
     return mesh, et, fes, a, f, pre_ASP, b, pMass_inv
 
 
@@ -240,65 +241,120 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=CF((0, 0)),
     
 def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
              order:int=0, nMGSmooth:int=2, aspSm:int=4, maxLevel:int=7,
-             drawResult:bool=False):
+             rtol:float=1e-8, drawResult:bool=False):
     
     epsilon = 1/nu/div_penalty
-    # ==== Upper BD
-    if dim==2:
-        utop = CoefficientFunction((4*x*(1-x),0))
-    elif dim==3:
-        utop = CoefficientFunction((16*x*(1-x)*y*(1-y),0,0))
-
+    uzawaIt = 8//int(math.log10(div_penalty))
     if drawResult:
         import netgen.gui
     print("#########################################################################")
-    print(f"DIM: {dim}, order: {order}")
-    print(f"h_corase: 1/{iniN*2}, h_fine: 1/{epsilon:.1e}, maxLevel: {maxLevel}")
-    print(f"viscosity: {nu:.1e}, c_div: {div_penalty:.1e}, epsilon: {1/nu/div_penalty:.1e}")
+    print(f"#  DIM: {dim}, order: {order}, uzawaIt: {uzawaIt}"), 
+    print(f"#  h_corase: 1/{iniN*2}, h_fine: 1/{epsilon:.1e}, maxLevel: {maxLevel}")
+    print(f"#  sviscosity: {nu:.1e}, c_div: {div_penalty:.1e}, epsilon: {1/nu/div_penalty:.1e}")
     print("#########################################################################")
     
     
-    wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
-    # wind = CF((0, 0))
-    mesh, et, fes, a, f, pre_ASP, b, pMass_inv = \
-                OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=wind, 
+    def oneOseenSolver(aMesh, aFes, aA, aAPrc, aB, aPm_inv, aF, bdSol):
+        # HDG STATIC CONDENSATION and SOLVED by AL uzawa
+        Q = L2(aMesh, order=order)
+        p_prev = GridFunction(Q)
+        aGfu = GridFunction(aFes)
+
+        it = 0
+        with TaskManager():
+            for _ in range(uzawaIt):
+                # ====== static condensation and solve
+                rhs = aF.vec.CreateVector()
+                rhs.data = aF.vec - aA.mat * bdSol.vec
+                rhs.data += -aB.mat * p_prev.vec
+                # # static condensation
+                rhs.data += aA.harmonic_extension_trans * rhs
+                inv_fes = GMResSolver(aA.mat, aAPrc, printrates=False, 
+                                    tol=1e-8, atol=1e-12, maxiter=200)
+                # use prev uzawa sol as initial guess
+                inv_fes.Solve(rhs=rhs, sol=aGfu.vec, initialize=False)
+                it += inv_fes.iterations
+
+                aGfu.vec.data += aA.harmonic_extension * aGfu.vec
+                aGfu.vec.data += aA.inner_solve * rhs
+                # update pressure
+                p_prev.vec.data += 1/epsilon * (aPm_inv @ aB.mat.T * aGfu.vec.data)
+        
+        it //= uzawaIt
+        return aGfu.vec, it
+        
+
+
+    # ===================== START OF NS SOLVING ====================
+    with TaskManager():
+        # ==== Upper BD
+        if dim==2:
+            utop = CoefficientFunction((4*x*(1-x),0))
+        elif dim==3:
+            utop = CoefficientFunction((16*x*(1-x)*y*(1-y),0,0))
+
+        # ====== 1. Stokes solver to get initial
+        mesh, et, fes, a, f, pre_ASP, b, pMass_inv = \
+                OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=None, 
                                 c_low=0, epsilon=epsilon,order=order, 
                                 nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel)
-
-    # ========== HDG STATIC CONDENSATION and SOLVED by AL uzawa
-    Q = L2(mesh, order=order)
-    p_prev = GridFunction(Q)
-    p_prev.vec.data[:] = 0
-    # homo dirichlet BC
-    gfu = GridFunction(fes)
-    Lh, uh, uhath = gfu.components
-    gfu.vec.data[:] = 0
-    uhath.Set(utop, definedon=mesh.Boundaries("top"))
-
-    t0 = timeit.time()
-    # ====== static condensation and solve
-    rhs = f.vec.CreateVector()
-    rhs.data = f.vec - a.mat * gfu.vec
-    rhs.data += -b.mat * p_prev.vec
-    # # static condensation
-    rhs.data += a.harmonic_extension_trans * rhs
-    inv_fes = GMResSolver(a.mat, pre_ASP, printrates=False, tol=1e-8, maxiter=200)
-    gfu.vec.data += inv_fes * rhs
-    it = inv_fes.iterations
-
-    gfu.vec.data += a.harmonic_extension * gfu.vec
-    gfu.vec.data += a.inner_solve * rhs
-    # update pressure
-    p_prev.vec.data += 1/epsilon * (pMass_inv @ b.mat.T * gfu.vec.data)
-    
-    t1 = timeit.time()
-
-    L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
-    print(f"===> one step Oseen solved: {t1-t0:.2e}, IT: {it}, uh divErr: {L2_divErr:.1E}")
-    if drawResult:
-        Draw(Norm(uh), mesh, "velNorm")
-        input('continue?')
+        # mesh, et, fes, b, pMass_inv => no need to update!
+        gfu = GridFunction(fes)
+        Lh, uh, uhath = gfu.components
+        gfu_bd = GridFunction(fes)
+        _, _, uhath_bd = gfu_bd.components
+        # homo dirichlet BC
+        uhath_bd.Set(utop, definedon=mesh.Boundaries("top"))
+        
+        gfu.vec.data, _ = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, gfu_bd)
+        uNorm0 = sqrt(Integrate(uh**2, mesh))
+        print(f"Stokes initial finished. uh init norm: {uNorm0:.1e}, atol: {uNorm0*rtol:.1e}.")
+        print("#########################################################################")
+        if drawResult:
+            Draw(Norm(uh), mesh, "velNorm")
+            input('init Stokes')
 
 
-nsSolver(dim=2, iniN=1, nu=1e-3, div_penalty=1e6,
-         order=0, nMGSmooth=2, aspSm=2, maxLevel=6, drawResult=False)
+        # ====== 2. Picard Iteration
+        uh_prev = uh.vec.CreateVector()
+        atol = uNorm0 * rtol
+        diffNorm = uNorm0
+        picardCnt = 1
+        MAXCNT = 100
+        while diffNorm > atol:
+            if picardCnt > MAXCNT:
+                print("MAX Picard Iter reached!!! Not converged!!!")
+                break
+            t0 = timeit.time()
+            mesh, et, fes, a, f, pre_ASP, b, pMass_inv = \
+                OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=uh, 
+                                c_low=0, epsilon=epsilon,order=order, 
+                                nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel)
+            t1 = timeit.time()
+            uh_prev.data = uh.vec
+            gfu.vec.data, it = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, gfu_bd) 
+            t2 = timeit.time()
+            uh.vec.data -= uh_prev
+            diffNorm = sqrt(Integrate(uh**2, mesh))
+            uh.vec.data += uh_prev
+            L2_divErr = sqrt(Integrate(div(uh)**2, mesh))
+            print(f"Picard #{picardCnt:>2}, diff_norm = {diffNorm:.1e},", 
+                  f"t_assem: {t1-t0:.1e}, t_cal: {t2-t1:.1e}, it_solver: {it:>2},",
+                  f"uh divErr: {L2_divErr:.1E}")
+
+            picardCnt += 1
+        
+        if drawResult:
+            Draw(Norm(uh), mesh, "velNorm")
+            input("picard")  
+
+        
+        # ====== 3. Newton Iteration
+        # TODO!!!!!!
+
+                
+
+if __name__ == '__main__':
+    nsSolver(dim=2, iniN=1, nu=1e-3, div_penalty=1e6,
+             order=3, nMGSmooth=2, aspSm=8, maxLevel=5, 
+             rtol=1e-6, drawResult=True)
