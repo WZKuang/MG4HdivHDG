@@ -146,17 +146,40 @@ void NonconformingFESpace :: GetFaceDofNrs (int fanr, Array<DofId> & dnums) cons
   }
 ```
 
-## Some Hackers to NGSolve Library Files:
+<!-- ## Some Hackers to NGSolve Library Files:
 
-1. In ngsolve.krylovspace (krylovspace.py), alter the default value of "initialization" in linear solver to be False, such that initial guess can be readily used in function "GMRes" without initialization.
+1. In ngsolve.krylovspace (krylovspace.py), add option "static" to the class "LinearSolver". When static condensation is used, the rhs has been minused by "a.mat * bdData" before the linear solver, and this could cause problem when static condensation and non-zero initial guess is used. Corresponding changes have also been made to "CGSolver", "MinResSolver" and "GMResSolver".
 ```Python
-# line 76
-def Solve(self, rhs : BaseVector, sol : Optional[BaseVector] = None, initialize : bool = False) -> BaseVector:
-```
+# Line 59, LinearSolver
+def __init__(self, mat : BaseMatrix,
+                 pre : Optional[Preconditioner] = None,
+                 freedofs : Optional[BitArray] = None,
+                 tol : float = None,
+                 maxiter : int = 100,
+                 atol : float = None,
+                 callback : Optional[Callable[[int, float], None]] = None,
+                 callback_sol : Optional[Callable[[BaseVector], None]] = None,
+                 printrates : bool = False, 
+                 static : bool = False):
 
-2. In ngsolve.krylovspace (krylovspace.py), change the return value of the function "GMRes" s.t. the iteration count is returned.
+# line 74
+self.static = static
+
+# line 183, CGSolver
+d.data = rhs.data if self.static else rhs - self.mat * sol
+
+# line 484, MinResSolver
+v.data = rhs.data if self.static else rhs - mat * u
+
+# line 746, GMResSolver
+tmp.data = rhs.data if self.static else rhs - A * sol
+
+``` -->
+
+
+<!-- 2. In ngsolve.krylovspace (krylovspace.py), change the return value of the function "GMRes" s.t. the iteration count is returned.
 ```Python
 # Line 891
-return (solver.Solve(rhs=b, sol=x), solver.iterations)
-```
+return solver.Solve(rhs=b, sol=x), solver.iterations
+``` -->
 

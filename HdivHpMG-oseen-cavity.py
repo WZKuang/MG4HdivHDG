@@ -271,19 +271,14 @@ def HdivHDGOseen(dim=2, iniN=4, nu=1e-3, wind=CF((1, 0)), c_low=0, initialSol=No
                 # update L and u
                 rhs.data += a.harmonic_extension_trans * rhs
 
-                if initialGuess is None:
-                    inv_fes = GMResSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
+                inv_fes = GMResSolver(a.mat, pre, printrates=False, static=False, 
+                                      tol=1e-8, maxiter=500)
+                if initialSol is None:
                     gfu.vec.data += inv_fes * rhs
-                    it += inv_fes.iterations
                 else:
-                    # inv_fes = GMResSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
-                    solTmp = gfu.vec.CreateVector()
-                    solTmp.data = Projector(fes.FreeDofs(True), True) * initialGuess[level]
-                    # inv_fes.Mult(rhs, solTmp, init=False)
-                    _, curIt = GMRes(a.mat, rhs, pre=pre, x=solTmp, maxsteps=500, tol=1e-8, # tol is defined as absolute here
-                                     printrates=False)
-                    gfu.vec.data += solTmp
-                    it += curIt
+                    inv_fes.Solve(rhs=rhs, sol=gfu.vec, initialize=False)
+                it += inv_fes.iterations
+                # inv_fes = GMResSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
 
                 gfu.vec.data += a.harmonic_extension * gfu.vec
                 gfu.vec.data += a.inner_solve * rhs
@@ -356,7 +351,7 @@ if dim != 2:
 # wind = CF((1, 0))
 # wind = CF((0, 0))
 wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
-initialSol = False
+initialSol = True
 maxLevel = 6
 iniN = 2
 # nuList = [1e-2, 5e-3, 1e-3, 5e-4] # visocity

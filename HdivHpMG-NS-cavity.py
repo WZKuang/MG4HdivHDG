@@ -4,7 +4,7 @@
 
 from ngsolve import *
 import time as timeit
-from ngsolve.krylovspace import GMResSolver
+from ngsolve.krylovspace import GMResSolver, GMRes
 # geometry
 from ngsolve.meshes import MakeStructured2DMesh, MakeStructured3DMesh
 # from netgen.geom2d import unit_square
@@ -20,7 +20,7 @@ import math
 # For each linearized Oseen problem, needs nested MG preconditioner 
 # for the lowest order case.
 def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None, 
-                   c_low:int=0, epsilon:float=1e-6,
+                   c_low:int=0, epsilon:float=1e-6, pseudo_timeinv:float=0.0,
                    order:int=0, nMGSmooth:int=2, aspSm:int=4, maxLevel:int=7):
     # ========== START of MESH ==========
     dirichBDs = ".*"
@@ -63,7 +63,12 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     a += -gradv * wind * u * dx(bonus_intorder=3)
     a += wind*n * (uhatup * tang(v-vhat)) * dx(element_boundary=True, bonus_intorder=3)   
     
+    
     f = LinearForm(fes)
+    # === pseudo time marching for relaxation
+    if pseudo_timeinv > 1e-16:
+        a += pseudo_timeinv * u * v * dx
+        f += pseudo_timeinv * wind * v * dx
 
 
 
@@ -93,6 +98,9 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     uhatup0 = IfPos(wind_h0*n, tang(u0), tang(uhat0))    
     a0 += -gradv0 * wind_h0 * u0 *dx(bonus_intorder=order)
     a0 += wind_h0*n * (uhatup0 * tang(v0-vhat0)) * dx(element_boundary=True, bonus_intorder=order)   
+    # === pseudo time marching for relaxation
+    if pseudo_timeinv > 1e-16:
+        a0 += pseudo_timeinv * u0 * v0 * dx
 
 
 
@@ -239,9 +247,11 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
 
 
     
+
+
 def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
              order:int=0, nMGSmooth:int=2, aspSm:int=4, maxLevel:int=7,
-             rtol:float=1e-8, drawResult:bool=False):
+             pseudo_timeinv:float=0.0, rtol:float=1e-8, drawResult:bool=False):
     
     epsilon = 1/nu/div_penalty
     uzawaIt = 8//int(math.log10(div_penalty))
@@ -249,20 +259,27 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         import netgen.gui
     print("#########################################################################")
     print(f"#  DIM: {dim}, order: {order}, uzawaIt: {uzawaIt}"), 
-    print(f"#  h_corase: 1/{iniN*2}, h_fine: 1/{epsilon:.1e}, maxLevel: {maxLevel}")
-    print(f"#  sviscosity: {nu:.1e}, c_div: {div_penalty:.1e}, epsilon: {1/nu/div_penalty:.1e}")
+    print(f"#  h_corase: 1/{iniN*2}, h_fine: 1/{2*iniN*2**maxLevel}, maxLevel: {maxLevel}")
+    print(f"#  viscosity: {nu:.1e}, c_div: {div_penalty:.1e}, epsilon: {epsilon:.1e}")
     print("#########################################################################")
     
     
-    def oneOseenSolver(aMesh, aFes, aA, aAPrc, aB, aPm_inv, aF, bdSol):
+    def oneOseenSolver(aMesh, aFes, aA, aAPrc, aB, aPm_inv, aF, bdSol, prevSol=None, init:bool=True):
         # HDG STATIC CONDENSATION and SOLVED by AL uzawa
         Q = L2(aMesh, order=order)
         p_prev = GridFunction(Q)
-        aGfu = GridFunction(aFes)
-
+        p_prev.vec.data[:] = 0
+        solTmp = bdSol.vec.CreateVector()
+        ''' NOTE: GMResSolver calculate the delta based on the current provided (global) sol.
+                  It will deal with rhs with rhs -= a.mat * solTmp,
+                  So in this static condensation process, solTmp should not contain BD data,
+                  otherwise cause wrong sol near BDs.
+        '''
         it = 0
         with TaskManager():
-            for _ in range(uzawaIt):
+            if not init:
+                solTmp.data = Projector(aFes.FreeDofs(True), True) * prevSol.vec
+            for it_u in range(uzawaIt):
                 # ====== static condensation and solve
                 rhs = aF.vec.CreateVector()
                 rhs.data = aF.vec - aA.mat * bdSol.vec
@@ -270,18 +287,18 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                 # # static condensation
                 rhs.data += aA.harmonic_extension_trans * rhs
                 inv_fes = GMResSolver(aA.mat, aAPrc, printrates=False, 
-                                    tol=1e-8, atol=1e-12, maxiter=200)
+                                      tol=1e-8, atol=1e-10, maxiter=100)
                 # use prev uzawa sol as initial guess
-                inv_fes.Solve(rhs=rhs, sol=aGfu.vec, initialize=False)
+                inv_fes.Solve(rhs=rhs, sol=solTmp, initialize=init if it_u==0 else False)
                 it += inv_fes.iterations
 
-                aGfu.vec.data += aA.harmonic_extension * aGfu.vec
-                aGfu.vec.data += aA.inner_solve * rhs
+                solTmp.data += aA.harmonic_extension * solTmp
+                solTmp.data += aA.inner_solve * rhs
                 # update pressure
-                p_prev.vec.data += 1/epsilon * (aPm_inv @ aB.mat.T * aGfu.vec.data)
+                p_prev.vec.data += 1/epsilon * (aPm_inv @ aB.mat.T * solTmp.data)
         
         it //= uzawaIt
-        return aGfu.vec, it
+        return bdSol.vec.data+Projector(fes.FreeDofs(True), True)*solTmp.data, it
         
 
 
@@ -298,20 +315,22 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                 OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=None, 
                                 c_low=0, epsilon=epsilon,order=order, 
                                 nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel)
-        # mesh, et, fes, b, pMass_inv => no need to update!
+        # mesh, et, fes, b, pMass_inv => the same during the NS solving process
         gfu = GridFunction(fes)
         Lh, uh, uhath = gfu.components
         gfu_bd = GridFunction(fes)
         _, _, uhath_bd = gfu_bd.components
         # homo dirichlet BC
+        uhath.Set(utop, definedon=mesh.Boundaries("top"))
         uhath_bd.Set(utop, definedon=mesh.Boundaries("top"))
         
         gfu.vec.data, _ = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, gfu_bd)
         uNorm0 = sqrt(Integrate(uh**2, mesh))
         print(f"Stokes initial finished. uh init norm: {uNorm0:.1e}, atol: {uNorm0*rtol:.1e}.")
         print("#########################################################################")
+        print("#############################  PICARD IT  ###############################")
         if drawResult:
-            Draw(Norm(uh), mesh, "velNorm")
+            Draw(uh, mesh, "vel")
             input('init Stokes')
 
 
@@ -320,34 +339,38 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         atol = uNorm0 * rtol
         diffNorm = uNorm0
         picardCnt = 1
-        MAXCNT = 100
+        MAXCNT = 50
         while diffNorm > atol:
             if picardCnt > MAXCNT:
                 print("MAX Picard Iter reached!!! Not converged!!!")
                 break
             t0 = timeit.time()
             mesh, et, fes, a, f, pre_ASP, b, pMass_inv = \
-                OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=uh, 
+                OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=uh,
                                 c_low=0, epsilon=epsilon,order=order, 
-                                nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel)
+                                nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel,
+                                pseudo_timeinv=pseudo_timeinv)
             t1 = timeit.time()
             uh_prev.data = uh.vec
-            gfu.vec.data, it = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, gfu_bd) 
+            gfu.vec.data, it = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, 
+                                              gfu_bd, gfu, init=False) 
             t2 = timeit.time()
             uh.vec.data -= uh_prev
             diffNorm = sqrt(Integrate(uh**2, mesh))
             uh.vec.data += uh_prev
             L2_divErr = sqrt(Integrate(div(uh)**2, mesh))
-            print(f"Picard #{picardCnt:>2}, diff_norm = {diffNorm:.1e},", 
-                  f"t_assem: {t1-t0:.1e}, t_cal: {t2-t1:.1e}, it_solver: {it:>2},",
-                  f"uh divErr: {L2_divErr:.1E}")
-
+            print(f"#{picardCnt:>2}, pseudo_timeinv: {pseudo_timeinv:.1e}, GMRes_it: {it:>2},", 
+                  f"diff_norm = {diffNorm:.1e}, uh divErr: {L2_divErr:.1E},",
+                  f"t_assem: {t1-t0:.1e}, t_cal: {t2-t1:.1e}")
+            
+            # TODO: Adaptivity of pseudo_timeinv
             picardCnt += 1
         
         if drawResult:
-            Draw(Norm(uh), mesh, "velNorm")
+            Draw(uh, mesh, "vel")
             input("picard")  
 
+        
         
         # ====== 3. Newton Iteration
         # TODO!!!!!!
@@ -355,6 +378,11 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                 
 
 if __name__ == '__main__':
-    nsSolver(dim=2, iniN=1, nu=1e-3, div_penalty=1e6,
-             order=3, nMGSmooth=2, aspSm=8, maxLevel=5, 
-             rtol=1e-6, drawResult=True)
+    # nuList = [1e-2, 1e-3, 5e-4]
+    nuList = [1e-3]
+    orderList = [3]
+    for aNu in nuList:
+        for aOrder in orderList:
+            nsSolver(dim=2, iniN=1, nu=aNu, div_penalty=1e7,
+                    order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=6, 
+                    pseudo_timeinv=0, rtol=1e-6, drawResult=False)
