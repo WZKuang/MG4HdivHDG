@@ -32,7 +32,7 @@ def HdivHDGOseen(dim=2, iniN=4, nu=1e-3, wind=CF((1, 0)), c_low=0, initialSol=No
               3. p-MG can explode when nu -> 0.
                  
     ''' 
-    uzawaIt = 2
+    uzawaIt = 1
     # ========== START of MESH ==========
     dirichBDs = ".*"
     mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
@@ -319,12 +319,13 @@ def HdivHDGOseen(dim=2, iniN=4, nu=1e-3, wind=CF((1, 0)), c_low=0, initialSol=No
             
         # exit if total global dofs exceed a0 tol
         M.Update(); W.Update(); fes.Update()
-        globalDofs = sum(W.FreeDofs(True)) + sum(M.FreeDofs(True))
+        globalDofs = sum(fes.FreeDofs(True))
+        totalDofs = sum(fes.FreeDofs())
         if globalDofs > maxdofs or level > maxLevel:
-            print(f'# totalDofs: {fes.ndof} # global DOFS {globalDofs}')
+            print(f'# totalDofs: {totalDofs} # global DOFS {globalDofs}')
             break
         print(f'===== LEVEL {level} =====')
-        print(f'# totalDofs: {fes.ndof} # global DOFS {globalDofs}')
+        print(f'# totalDofs: {totalDofs} # global DOFS {globalDofs}')
         MG0 = SolveBVP_CR(level, drawResult, MG0)
         print(f'======================')
         level += 1

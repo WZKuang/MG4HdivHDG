@@ -284,12 +284,13 @@ while True:
         
     # exit if total global dofs exceed a0 tol
     M.Update(); W.Update(); fes.Update()
-    globalDofs = sum(W.FreeDofs(True)) + sum(M.FreeDofs(True))
+    globalDofs = sum(fes.FreeDofs(True))
+    totalDofs = sum(fes.FreeDofs())
     if globalDofs > maxdofs or level > maxLevel:
-        print(f'# totalDofs: {fes.ndof} # global DOFS {globalDofs}')
+        print(f'# totalDofs: {totalDofs} # global DOFS {globalDofs}')
         break
     print(f'===== LEVEL {level} =====')
-    print(f'# totalDofs: {fes.ndof} # global DOFS {globalDofs}')
+    print(f'# totalDofs: {totalDofs} # global DOFS {globalDofs}')
     SolveBVP(level, drawResult)
     print(f'======================')
     level += 1
