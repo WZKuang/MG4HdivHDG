@@ -280,6 +280,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
             if not init:
                 solTmp.data = Projector(aFes.FreeDofs(True), True) * prevSol.vec
             for it_u in range(uzawaIt):
+                solTmp.data = Projector(aFes.FreeDofs(True), True) * solTmp
                 # ====== static condensation and solve
                 rhs = aF.vec.CreateVector()
                 rhs.data = aF.vec - aA.mat * bdSol.vec
@@ -380,9 +381,9 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 if __name__ == '__main__':
     # nuList = [1e-2, 1e-3, 5e-4]
     nuList = [1e-3]
-    orderList = [3]
+    orderList = [1]
     for aNu in nuList:
         for aOrder in orderList:
-            nsSolver(dim=2, iniN=1, nu=aNu, div_penalty=1e7,
+            nsSolver(dim=2, iniN=1, nu=aNu, div_penalty=1e6,
                     order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=6, 
                     pseudo_timeinv=0, rtol=1e-6, drawResult=False)

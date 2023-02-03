@@ -32,7 +32,7 @@ def HdivHDGOseen(dim=2, iniN=4, nu=1e-3, wind=CF((1, 0)), c_low=0, initialSol=No
               3. p-MG can explode when nu -> 0.
                  
     ''' 
-    uzawaIt = 1
+    uzawaIt = 2
     # ========== START of MESH ==========
     dirichBDs = ".*"
     mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
@@ -261,30 +261,29 @@ def HdivHDGOseen(dim=2, iniN=4, nu=1e-3, wind=CF((1, 0)), c_low=0, initialSol=No
             # p mass diagonal in both 2D and 3D cases
             pMass_inv= pMass.mat.CreateSmoother(Q.FreeDofs())
             it = 0
-            for _ in range(uzawaIt):
-                # homo dirichlet BC
-                gfu.vec.data[:] = 0
-                uhath.Set(utop, definedon=mesh.Boundaries("top"))
+            # homo dirichlet BC
+            gfu.vec.data[:] = 0
+            uhath.Set(utop, definedon=mesh.Boundaries("top"))
+            solTmp = gfu.vec.CreateVector()
+            for it_u in range(uzawaIt):
+                solTmp.data = Projector(fes.FreeDofs(True), True) * solTmp
                 rhs = f.vec.CreateVector()
                 rhs.data = f.vec - a.mat * gfu.vec
                 rhs.data += -b.mat * p_prev.vec
                 # update L and u
                 rhs.data += a.harmonic_extension_trans * rhs
-
-                inv_fes = GMResSolver(a.mat, pre, printrates=False, static=False, 
+                inv_fes = GMResSolver(a.mat, pre, printrates=False, 
                                       tol=1e-8, maxiter=500)
-                if initialSol is None:
-                    gfu.vec.data += inv_fes * rhs
-                else:
-                    inv_fes.Solve(rhs=rhs, sol=gfu.vec, initialize=False)
+                init = True if initialSol is None else False
+                inv_fes.Solve(rhs=rhs, sol=solTmp, initialize=init if it_u == 0 else False)
                 it += inv_fes.iterations
                 # inv_fes = GMResSolver(a.mat, pre, printrates=False, tol=1e-8, maxiter=500)
 
-                gfu.vec.data += a.harmonic_extension * gfu.vec
-                gfu.vec.data += a.inner_solve * rhs
+                solTmp.data += a.harmonic_extension * solTmp
+                solTmp.data += a.inner_solve * rhs
                 # update pressure
-                p_prev.vec.data += 1/epsilon * (pMass_inv @ b.mat.T * gfu.vec.data)
-
+                p_prev.vec.data += 1/epsilon * (pMass_inv @ b.mat.T * solTmp.data)
+            gfu.vec.data += Projector(fes.FreeDofs(True), True) * solTmp
 
             # ========= PRINT RESULTS
             t2 = timeit.time()
@@ -351,7 +350,7 @@ if dim != 2:
 # wind = CF((1, 0))
 # wind = CF((0, 0))
 wind = CF((4*(2*y-1)*(1-x)*x, -4*(2*x-1)*(1-y)*y))
-initialSol = True
+initialSol = False
 maxLevel = 6
 iniN = 2
 # nuList = [1e-2, 5e-3, 1e-3, 5e-4] # visocity
