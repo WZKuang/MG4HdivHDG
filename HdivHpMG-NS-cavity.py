@@ -26,8 +26,10 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     dirichBDs = ".*"
     if dim==2:
         mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
+        vertexBlock = True
     elif dim==3:
         mesh = MakeStructured3DMesh(hexes=False, nx=iniN, ny=iniN, nz=iniN)
+        vertexBlock = False # edge-patched blocks in 3D to save memory
     # ========== END of MESH ==========
 
     if wind is None:
@@ -76,12 +78,15 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     # ========= mixed-HidvHDG scheme =========
     V0 = MatrixValued(L2(mesh, order=0), mesh.dim, False)
     W0 = HDiv(mesh, order=0, RT=True, dirichlet=dirichBDs) if mesh.dim == 2 \
-         else HDiv(mesh, order=0, dirichlet=dirichBDs)
+         else HDiv(mesh, order=0, RT=False, dirichlet=dirichBDs)
     M0 = TangentialFacetFESpace(mesh, order=0, dirichlet=dirichBDs)
     
+    ''' TODO: why interpolation not good in 3D?????
+    '''
     # Interpolate the wind
     wind_h0 = GridFunction(W0)
     wind_h0.Set(wind)
+    # wind_h0 = wind
 
     fes0 = V0 * W0 * M0 
     (L0, u0,uhat0),  (G0, v0, vhat0) = fes0.TnT()
@@ -108,9 +113,13 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     # ============== TRANSFER OPERATORS
     # === L2 projection from CR to fes0, for prolongation operator
     V_cr = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
-    fes_cr = V_cr * V_cr
-    (ux_cr, uy_cr), (vx_cr, vy_cr) = fes_cr.TnT()
-    u_cr, v_cr = CF((ux_cr, uy_cr)), CF((vx_cr, vy_cr))
+    fes_cr = V_cr * V_cr if dim==2 else V_cr * V_cr * V_cr
+    if dim == 2:
+        (ux_cr, uy_cr), (vx_cr, vy_cr) = fes_cr.TnT()
+        u_cr, v_cr = CF((ux_cr, uy_cr)), CF((vx_cr, vy_cr))
+    else:
+        (ux_cr, uy_cr, uz_cr), (vx_cr, vy_cr, vz_cr) = fes_cr.TnT()
+        u_cr, v_cr = CF((ux_cr, uy_cr, uz_cr)), CF((vx_cr, vy_cr, vz_cr))
 
     mixmass0 = BilinearForm(trialspace=fes_cr, testspace=fes0)
     # tangential part
@@ -123,14 +132,24 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     fesMass0 += (u0*n) * (v0*n) * dx(element_boundary=True)
     
     # === L2 projection from fes0 to CR, for prolongation operator
-    ir = IntegrationRule(SEGM, 1)
-    mixmass_cr = BilinearForm(trialspace=fes0, testspace=fes_cr)
-    mixmass_cr += tang(uhat0) * tang(v_cr) * dx(element_boundary=True, intrules={SEGM: ir})
-    mixmass_cr += u0*n * v_cr*n * dx(element_boundary=True, intrules={SEGM: ir})
+    if dim == 2:
+        ir = IntegrationRule(SEGM, 1)
+        mixmass_cr = BilinearForm(trialspace=fes0, testspace=fes_cr)
+        mixmass_cr += tang(uhat0) * tang(v_cr) * dx(element_boundary=True, intrules={SEGM: ir})
+        mixmass_cr += u0*n * v_cr*n * dx(element_boundary=True, intrules={SEGM: ir})
 
-    fesMass_cr = BilinearForm(fes_cr)
-    fesMass_cr += tang(u_cr) * tang(v_cr) * dx(element_boundary=True, intrules={SEGM: ir})
-    fesMass_cr += u_cr*n * v_cr*n * dx(element_boundary=True, intrules={SEGM: ir})
+        fesMass_cr = BilinearForm(fes_cr)
+        fesMass_cr += tang(u_cr) * tang(v_cr) * dx(element_boundary=True, intrules={SEGM: ir})
+        fesMass_cr += u_cr*n * v_cr*n * dx(element_boundary=True, intrules={SEGM: ir})
+    else:
+        ir = IntegrationRule(TRIG, 1)
+        mixmass_cr = BilinearForm(trialspace=fes0, testspace=fes_cr)
+        mixmass_cr += tang(uhat0) * tang(v_cr) * dx(element_boundary=True, intrules={TRIG: ir})
+        mixmass_cr += u0*n * v_cr*n * dx(element_boundary=True, intrules={TRIG: ir})
+
+        fesMass_cr = BilinearForm(fes_cr)
+        fesMass_cr += tang(u_cr) * tang(v_cr) * dx(element_boundary=True, intrules={TRIG: ir})
+        fesMass_cr += u_cr*n * v_cr*n * dx(element_boundary=True, intrules={TRIG: ir})
 
     # === L2 projection from fes0 to fes
     mixmass = BilinearForm(trialspace=fes0, testspace=fes)
@@ -170,10 +189,12 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
 
             fesMass0.Assemble(); mixmass0.Assemble()
             fesMass_cr.Assemble(); mixmass_cr.Assemble()
-
-            fesM0_inv = fesMass0.mat.CreateSmoother(fes0.FreeDofs(True))
-            fesMass_cr_inv = fesMass_cr.mat.CreateSmoother(fes_cr.FreeDofs())
-
+            if dim == 2:
+                fesM0_inv = fesMass0.mat.CreateSmoother(fes0.FreeDofs(True))
+                fesMass_cr_inv = fesMass_cr.mat.CreateSmoother(fes_cr.FreeDofs())
+            else:
+                fesM0_inv = fesMass0.mat.CreateBlockSmoother(fes0.CreateFacetBlocks(globalDofs=True))
+                fesMass_cr_inv = fesMass_cr.mat.CreateBlockSmoother(fes_cr.CreateFacetBlocks(globalDofs=False))
             cr2fes0 = fesM0_inv @ mixmass0.mat # cr2fes0: fes_cr => fes0
             fes02cr = fesMass_cr_inv @ mixmass_cr.mat
 
@@ -194,18 +215,24 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
                 pdofs[V0.ndof: V0.ndof+W0.ndof] = inner
                 pdofs[V0.ndof+W0.ndof: ] = inner
                 # he_prol
+                ''' TODO: why a0.mat.inverse fails when "umfpack"??????
+                '''
                 pp.append(a0.mat.Inverse(pdofs, inverse="umfpack"))
                 pp.append([cr2fes0, fes02cr])
                 # block smoothers, if no hacker made to ngsolve source file,
                 # use the following line instead
                 # pp.append(VertexPatchBlocks(mesh, fes_cr)) 
-                fes0Blocks = fes0.CreateSmoothBlocks(vertex=True, globalDofs=True)
+                fes0Blocks = fes0.CreateSmoothBlocks(vertex=vertexBlock, globalDofs=True)
                 # === block GS as MG smoother, not good with nu/1/epsilon ratio
                 pp.append(fes0Blocks)
                 MG0.Update(a0.mat, pp)
             
             if level < maxLevel:
-                mesh.ngmesh.Refine()
+                # mesh.ngmesh.Refine()
+                if mesh.dim == 2:
+                    mesh.ngmesh.Refine()
+                else:
+                    mesh.Refine(onlyonce = True)
 
             
         
@@ -214,7 +241,11 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
         a.Assemble(); f.Assemble()
         
         fesMass.Assemble(); mixmass.Assemble()
-        fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
+        # TODO: mass inverse, 3D block diagonal???
+        if dim == 2:
+            fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
+        else:
+            fesM_inv = fesMass.mat.CreateBlockSmoother(fes.CreateFacetBlocks(globalDofs=True))
         E = fesM_inv @ mixmass.mat # E: fes0 => fes
         ET = mixmass.mat.T @ fesM_inv
 
@@ -225,7 +256,7 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
         # block smoothers, if no hacker made to ngsolve source file,
         # use the following line instead
         # blocks = VertexPatchBlocks(mesh, fes) if mesh.dim == 2 else EdgePatchBlocks(mesh, fes)
-        fesBlocks = fes.CreateSmoothBlocks(vertex=True, globalDofs=True)   
+        fesBlocks = fes.CreateSmoothBlocks(vertex=vertexBlock, globalDofs=True)   
         # === block GS smoother as multi-ASP smoother, not good with nu/1/epsilon ratio
         aspSmoother = a.mat.CreateBlockSmoother(fesBlocks)
         pre_ASP = MultiASP(a.mat, fes.FreeDofs(True), lowOrderSolver, 
@@ -260,6 +291,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
     print("#########################################################################")
     print(f"#  DIM: {dim}, order: {order}, uzawaIt: {uzawaIt}"), 
     print(f"#  h_corase: 1/{iniN*2}, h_fine: 1/{2*iniN*2**maxLevel}, maxLevel: {maxLevel}")
+    print(f"#  MG nSm: {nMGSmooth}, Multi-ASP nSm: {aspSm}")
     print(f"#  viscosity: {nu:.1e}, c_div: {div_penalty:.1e}, epsilon: {epsilon:.1e}")
     print("#########################################################################")
     
@@ -331,14 +363,15 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         print("#########################################################################")
         print("#############################  PICARD IT  ###############################")
         if drawResult:
-            Draw(uh, mesh, "vel")
+            Draw(Norm(uh), mesh, "velNorm")
             input('init Stokes')
 
 
         # ====== 2. Picard Iteration
         uh_prev = uh.vec.CreateVector()
-        atol = uNorm0 * rtol
+        atol = max(uNorm0 * rtol, 1e-10) # set lower bound for absolute tol
         diffNorm = uNorm0
+        avg_picardIt = 0
         picardCnt = 1
         MAXCNT = 50
         while diffNorm > atol:
@@ -364,12 +397,16 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                   f"diff_norm = {diffNorm:.1e}, uh divErr: {L2_divErr:.1E},",
                   f"t_assem: {t1-t0:.1e}, t_cal: {t2-t1:.1e}")
             
-            # TODO: Adaptivity of pseudo_timeinv
+            # TODO: Adaptivity of pseudo_timeinv!!!
+            avg_picardIt = avg_picardIt * (picardCnt-1) / picardCnt + it / picardCnt
             picardCnt += 1
         
         if drawResult:
-            Draw(uh, mesh, "vel")
+            Draw(Norm(uh), mesh, "velNorm")
             input("picard")  
+        print(f"Picard Avg It: {avg_picardIt:.1f}")
+        print("###########################  PICARD IT END  #############################")
+        print("#########################################################################")
 
         
         
@@ -380,10 +417,11 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
 if __name__ == '__main__':
     # nuList = [1e-2, 1e-3, 5e-4]
-    nuList = [1e-3]
-    orderList = [1]
+    nuList = [1e-2]
+    orderList = [0]
     for aNu in nuList:
         for aOrder in orderList:
-            nsSolver(dim=2, iniN=1, nu=aNu, div_penalty=1e6,
-                    order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=6, 
-                    pseudo_timeinv=0, rtol=1e-6, drawResult=False)
+            for maxLevel in [5]:
+                nsSolver(dim=2, iniN=2, nu=aNu, div_penalty=1e6,
+                        order=aOrder, nMGSmooth=1, aspSm=1 if aNu >= 5e-4 else 16, maxLevel=maxLevel, 
+                        pseudo_timeinv=0.0, rtol=1e-8, drawResult=False)
