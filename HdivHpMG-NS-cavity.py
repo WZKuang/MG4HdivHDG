@@ -14,93 +14,8 @@ from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
 from auxPyFiles.myMG import MultiGrid
 # from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
 from auxPyFiles.myASP import MultiASP
+from auxPyFiles.mySmoother import blockGenerator
 import math
-
-
-
-# ============================================================================
-# ============================================================================
-# Generate pre-assembled blocks to save time, especially in 3D cases
-# result[0] -> fes0 facet/edge-patched blocks for smoothing
-# result[1] -> fes0 facet blocks for mass mat inverse
-# result[2] -> fes_cr facet blocks for mass mat inverse
-# result[3] -> fes facet/edge-patched blocks for smoothing
-# result[4] -> fes facet blocks for mass mat inverse
-def blockGenerator(dim:int=2, iniN:int=4, order:int=0, maxLevel:int=7):
-    # ========== START of MESH ==========
-    dirichBDs = ".*"
-    if dim==2:
-        mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
-        vertexBlock = True
-    elif dim==3:
-        mesh = MakeStructured3DMesh(hexes=False, nx=iniN, ny=iniN, nz=iniN)
-        vertexBlock = False # edge-patched blocks in 3D to save memory
-    # ========== END of MESH ==========
-
-    V = MatrixValued(L2(mesh, order=order), mesh.dim, False)
-    if mesh.dim == 2:
-        W = HDiv(mesh, order=order, RT=True, dirichlet=dirichBDs)
-    elif mesh.dim == 3:
-        W = HDiv(mesh, order=order, 
-                 RT=True if order>=1 else False, dirichlet=dirichBDs) # inconsistent option when lowest order
-    M = TangentialFacetFESpace(mesh, order=order, dirichlet=dirichBDs)
-    fes = V * W * M 
-
-
-
-    V0 = MatrixValued(L2(mesh, order=0), mesh.dim, False)
-    W0 = HDiv(mesh, order=0, RT=True, dirichlet=dirichBDs) if mesh.dim == 2 \
-         else HDiv(mesh, order=0, RT=False, dirichlet=dirichBDs)
-    M0 = TangentialFacetFESpace(mesh, order=0, dirichlet=dirichBDs)
-    fes0 = V0 * W0 * M0 
-
-
-
-    V_cr = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
-    if dim == 2:
-        fes_cr = V_cr * V_cr
-    else:
-        fes_cr = V_cr * V_cr * V_cr
-    
-    fes0patchBlocks = []
-    fes0facetBlocks = []
-    fesCrFacetBlocks = []
-    # ========= START of Operators Assembling ==========
-    with TaskManager():
-        for level in range(maxLevel+1):
-            fes0.Update(); fes_cr.Update()
-
-            if dim == 3:
-                fes0facetBlocks.append(fes0.CreateFacetBlocks(globalDofs=True))
-                fesCrFacetBlocks.append(fes_cr.CreateFacetBlocks(globalDofs=False))
-
-            # ========== MG initialize and update
-            if level == 0:
-                fes0patchBlocks.append(None)
-            else:
-                fes0patchBlocks.append(fes0.CreateSmoothBlocks(vertex=vertexBlock, globalDofs=True))
-            
-            if level < maxLevel:
-                # mesh.ngmesh.Refine()
-                if mesh.dim == 2:
-                    mesh.ngmesh.Refine()
-                else:
-                    mesh.Refine(onlyonce = True)
-        
-        result = []
-        result.append(fes0patchBlocks)
-        result.append(fes0facetBlocks)
-        result.append(fesCrFacetBlocks)
-        # ==== Update of high order Hdiv-HDG
-        fes.Update()
-        result.append(fes.CreateSmoothBlocks(vertex=vertexBlock, globalDofs=True)  ) 
-        if dim == 3:
-            result.append(fes.CreateFacetBlocks(globalDofs=True))
-        else:
-            result.append(None)
-    
-    return result
-
 
 
 
@@ -532,11 +447,11 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
 if __name__ == '__main__':
     # nuList = [1e-2, 1e-3, 5e-4]
-    nuList = [1e-2]
-    orderList = [0]
+    nuList = [1e-3]
+    orderList = [1]
     for aNu in nuList:
         for aOrder in orderList:
-            for maxLevel in [5]:
-                nsSolver(dim=2, iniN=1, nu=aNu, div_penalty=1e6,
+            for maxLevel in [10]:
+                nsSolver(dim=3, iniN=1, nu=aNu, div_penalty=1e6,
                         order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=maxLevel, 
-                        pseudo_timeinv=0.0, rtol=1e-8, drawResult=False)
+                        pseudo_timeinv=0.5, rtol=1e-6, drawResult=True)
