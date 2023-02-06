@@ -16,12 +16,13 @@ from auxPyFiles.myMG import MultiGrid
 from auxPyFiles.myASP import MultiASP
 import math
 
-
 # For each linearized Oseen problem, needs nested MG preconditioner 
 # for the lowest order case.
 def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None, 
                    c_low:int=0, epsilon:float=1e-6, pseudo_timeinv:float=0.0,
                    order:int=0, nMGSmooth:int=2, aspSm:int=4, maxLevel:int=7):
+    ''' TODO: Take out assembling parts that repeat in each picard iteration!!!
+    '''
     # ========== START of MESH ==========
     dirichBDs = ".*"
     if dim==2:
@@ -36,7 +37,7 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
         wind = CF((0, 0)) if dim == 2 else CF((0, 0, 0))
     n = specialcf.normal(mesh.dim)
     def tang(v):
-            return v - (v*n)*n
+        return v - (v*n)*n
 
 
     # ========= START of HIGHER ORDER Hdiv-HDG SCHEME TO BE SOLVED by p-MG==========
@@ -62,8 +63,8 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     a += (nu * tang(u-uhat) * tang(G*n) - nu * tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
     # === convection part
     uhatup = IfPos(wind*n, tang(u), tang(uhat))    
-    a += -gradv * wind * u * dx(bonus_intorder=3)
-    a += wind*n * (uhatup * tang(v-vhat)) * dx(element_boundary=True, bonus_intorder=3)   
+    a += -gradv * wind * u * dx(bonus_intorder=order)
+    a += wind*n * (uhatup * tang(v-vhat)) * dx(element_boundary=True, bonus_intorder=order)   
     
     
     f = LinearForm(fes)
@@ -81,12 +82,13 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
          else HDiv(mesh, order=0, RT=False, dirichlet=dirichBDs)
     M0 = TangentialFacetFESpace(mesh, order=0, dirichlet=dirichBDs)
     
-    ''' TODO: why interpolation not good in 3D?????
-    '''
+
     # Interpolate the wind
-    wind_h0 = GridFunction(W0)
+    ''' NOTE: The Set function of RT0 GridFunction in 3D could result in NaN!!!
+    '''
+    windW = HDiv(mesh, order=max(1, order), RT=True)
+    wind_h0 = GridFunction(windW)
     wind_h0.Set(wind)
-    # wind_h0 = wind
 
     fes0 = V0 * W0 * M0 
     (L0, u0,uhat0),  (G0, v0, vhat0) = fes0.TnT()
@@ -100,9 +102,9 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
         -nu * InnerProduct(gradu0, G0) + nu * InnerProduct(L0, gradv0)) * dx
     a0 += (nu * tang(u0-uhat0) * tang(G0*n) - nu * tang(L0*n) * tang(v0-vhat0))*dx(element_boundary=True)
     # === convection part
-    uhatup0 = IfPos(wind_h0*n, tang(u0), tang(uhat0))    
+    uhatup0 = IfPos(wind_h0*n, tang(u0), tang(uhat0))  
     a0 += -gradv0 * wind_h0 * u0 *dx(bonus_intorder=order)
-    a0 += wind_h0*n * (uhatup0 * tang(v0-vhat0)) * dx(element_boundary=True, bonus_intorder=order)   
+    a0 += wind_h0*n * uhatup0 * (tang(v0)-tang(vhat0)) * dx(element_boundary=True, bonus_intorder=order)   
     # === pseudo time marching for relaxation
     if pseudo_timeinv > 1e-16:
         a0 += pseudo_timeinv * u0 * v0 * dx
@@ -113,11 +115,12 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     # ============== TRANSFER OPERATORS
     # === L2 projection from CR to fes0, for prolongation operator
     V_cr = FESpace('nonconforming', mesh, dirichlet=dirichBDs)
-    fes_cr = V_cr * V_cr if dim==2 else V_cr * V_cr * V_cr
     if dim == 2:
+        fes_cr = V_cr * V_cr
         (ux_cr, uy_cr), (vx_cr, vy_cr) = fes_cr.TnT()
         u_cr, v_cr = CF((ux_cr, uy_cr)), CF((vx_cr, vy_cr))
     else:
+        fes_cr = V_cr * V_cr * V_cr
         (ux_cr, uy_cr, uz_cr), (vx_cr, vy_cr, vz_cr) = fes_cr.TnT()
         u_cr, v_cr = CF((ux_cr, uy_cr, uz_cr)), CF((vx_cr, vy_cr, vz_cr))
 
@@ -177,14 +180,13 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     prol = FacetProlongationTrig2(mesh, et) if dim==2 \
            else FacetProlongationTet2(mesh, et) # for CR element
 
-    t0 = timeit.time()
     MG0 = None
     # ========= START of Operators Assembling ==========
     with TaskManager():
     # with TaskManager(pajetrace=10**8):
         for level in range(maxLevel+1):
             fes0.Update(); fes_cr.Update()
-            wind_h0.Update(); wind_h0.Set(wind)
+            windW.Update(); wind_h0.Update(); wind_h0.Set(wind)
             a0.Assemble()
 
             fesMass0.Assemble(); mixmass0.Assemble()
@@ -211,12 +213,21 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
                 pp.append(V_cr.ndof)
                 pdofs = BitArray(fes0.ndof)
                 pdofs[:] = 0
-                inner = prol.GetInnerDofs(level)
-                pdofs[V0.ndof: V0.ndof+W0.ndof] = inner
-                pdofs[V0.ndof+W0.ndof: ] = inner
-                # he_prol
-                ''' TODO: why a0.mat.inverse fails when "umfpack"??????
+                innerFaces = prol.GetInnerDofs(level)
+                # Hdiv Inner dofs
+                pdofs[V0.ndof: V0.ndof+W0.ndof] = innerFaces
+                ''' NOTE: TangentialFacetFESpace in 3D has 2 dofs on each facet,
+                          different from 2D cases!!!!
                 '''
+                # Hcurl Inner dofs
+                if dim == 2:
+                    pdofs[V0.ndof+W0.ndof: ] = innerFaces
+                else:
+                    for i in range(mesh.nface):
+                        if innerFaces[i]:
+                            pdofs.Set(V0.ndof+W0.ndof+ 2*i)
+                            pdofs.Set(V0.ndof+W0.ndof+ 2*i +1)
+                # he_prol
                 pp.append(a0.mat.Inverse(pdofs, inverse="umfpack"))
                 pp.append([cr2fes0, fes02cr])
                 # block smoothers, if no hacker made to ngsolve source file,
@@ -241,7 +252,6 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
         a.Assemble(); f.Assemble()
         
         fesMass.Assemble(); mixmass.Assemble()
-        # TODO: mass inverse, 3D block diagonal???
         if dim == 2:
             fesM_inv = fesMass.mat.CreateSmoother(fes.FreeDofs(True))
         else:
@@ -270,7 +280,6 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
         pMass_inv= pMass.mat.CreateSmoother(Q.FreeDofs())
     
     # ========= END of Operators Assembling ==========
-    t1 = timeit.time()
     # NOTE: MeshTopology needed to be returned together with
     #       MG0, otherwise segmentation error
     return mesh, et, fes, a, f, pre_ASP, b, pMass_inv
@@ -286,8 +295,8 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
     
     epsilon = 1/nu/div_penalty
     uzawaIt = 8//int(math.log10(div_penalty))
-    if drawResult:
-        import netgen.gui
+    # if drawResult:
+    #     import netgen.gui
     print("#########################################################################")
     print(f"#  DIM: {dim}, order: {order}, uzawaIt: {uzawaIt}"), 
     print(f"#  h_corase: 1/{iniN*2}, h_fine: 1/{2*iniN*2**maxLevel}, maxLevel: {maxLevel}")
@@ -344,11 +353,13 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
             utop = CoefficientFunction((16*x*(1-x)*y*(1-y),0,0))
 
         # ====== 1. Stokes solver to get initial
+        t0 = timeit.time()
         mesh, et, fes, a, f, pre_ASP, b, pMass_inv = \
                 OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=None, 
                                 c_low=0, epsilon=epsilon,order=order, 
                                 nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel)
         # mesh, et, fes, b, pMass_inv => the same during the NS solving process
+        t1 = timeit.time()
         gfu = GridFunction(fes)
         Lh, uh, uhath = gfu.components
         gfu_bd = GridFunction(fes)
@@ -358,13 +369,15 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         uhath_bd.Set(utop, definedon=mesh.Boundaries("top"))
         
         gfu.vec.data, _ = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, gfu_bd)
+        t2 = timeit.time()
         uNorm0 = sqrt(Integrate(uh**2, mesh))
-        print(f"Stokes initial finished. uh init norm: {uNorm0:.1e}, atol: {uNorm0*rtol:.1e}.")
+        print(f"Stokes initial finished Assem {t1-t0:.1e} Cal {t2-t1:.1e}",
+              f"uh init norm: {uNorm0:.1e} atol: {uNorm0*rtol:.1e}")
         print("#########################################################################")
         print("#############################  PICARD IT  ###############################")
-        if drawResult:
-            Draw(Norm(uh), mesh, "velNorm")
-            input('init Stokes')
+        # if drawResult:
+        #     Draw(Norm(uh), mesh, "velNorm")
+        #     input('init Stokes')
 
 
         # ====== 2. Picard Iteration
@@ -373,7 +386,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         diffNorm = uNorm0
         avg_picardIt = 0
         picardCnt = 1
-        MAXCNT = 50
+        MAXCNT = 80
         while diffNorm > atol:
             if picardCnt > MAXCNT:
                 print("MAX Picard Iter reached!!! Not converged!!!")
@@ -397,11 +410,13 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                   f"diff_norm = {diffNorm:.1e}, uh divErr: {L2_divErr:.1E},",
                   f"t_assem: {t1-t0:.1e}, t_cal: {t2-t1:.1e}")
             
-            # TODO: Adaptivity of pseudo_timeinv!!!
+            ''' TODO: Adaptivity of pseudo_timeinv!!!
+            '''
             avg_picardIt = avg_picardIt * (picardCnt-1) / picardCnt + it / picardCnt
             picardCnt += 1
         
         if drawResult:
+            import netgen.gui
             Draw(Norm(uh), mesh, "velNorm")
             input("picard")  
         print(f"Picard Avg It: {avg_picardIt:.1f}")
@@ -410,8 +425,10 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
         
         
+        ''' TODO!!!!!
+        '''
         # ====== 3. Newton Iteration
-        # TODO!!!!!!
+        
 
                 
 
@@ -422,6 +439,6 @@ if __name__ == '__main__':
     for aNu in nuList:
         for aOrder in orderList:
             for maxLevel in [5]:
-                nsSolver(dim=2, iniN=2, nu=aNu, div_penalty=1e6,
-                        order=aOrder, nMGSmooth=1, aspSm=1 if aNu >= 5e-4 else 16, maxLevel=maxLevel, 
+                nsSolver(dim=3, iniN=4, nu=aNu, div_penalty=1e6,
+                        order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=maxLevel, 
                         pseudo_timeinv=0.0, rtol=1e-8, drawResult=False)
