@@ -23,12 +23,11 @@ import math
 # ============================================================================
 # For each linearized Oseen problem, needs nested MG preconditioner 
 # for the lowest order case.
-def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None, 
+def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
                    c_low:int=0, epsilon:float=1e-6, pseudo_timeinv:float=0.0,
                    order:int=0, nMGSmooth:int=2, aspSm:int=4, maxLevel:int=7,
-                   preBlocks=None):
-    ''' TODO: Take out assembling parts that repeat in each picard iteration!!!
-    '''
+                   preBlocks=None, newton:bool=False):
+
     # ========== START of MESH ==========
     dirichBDs = ".*"
     if dim==2:
@@ -39,6 +38,7 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
 
     if wind is None:
         wind = CF((0, 0)) if dim == 2 else CF((0, 0, 0))
+        newton = False
     n = specialcf.normal(mesh.dim)
     def tang(v):
         return v - (v*n)*n
@@ -46,6 +46,20 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
 
     # ========= START of HIGHER ORDER Hdiv-HDG SCHEME TO BE SOLVED by p-MG==========
     # ========= mixed-HidvHDG scheme =========
+    # Interpolate the wind
+    ''' NOTE: 1. The Set function of RT0 GridFunction in 3D could result in NaN!!!
+              2. Without interpolation from fes to wind_h and windhat_h spaces, 
+                 the assembling time could be very long!!!
+    '''
+    windW = HDiv(mesh, order=max(1, order), RT=True)
+    wind_h = GridFunction(windW)
+    wind_h.Set(wind)
+    # if newton:
+    #     windhatM = TangentialFacetFESpace(mesh, order=order)
+    #     windhat_h = GridFunction(windhatM)
+    #     windhat_h.Set(wind)
+    #     windhat_h.vec.data = windhat.vec
+    
     V = MatrixValued(L2(mesh, order=order), mesh.dim, False)
     if mesh.dim == 2:
         W = HDiv(mesh, order=order, RT=True, dirichlet=dirichBDs)
@@ -66,12 +80,19 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
         -nu * InnerProduct(gradu, G) + nu * InnerProduct(L, gradv)) * dx
     a += (nu * tang(u-uhat) * tang(G*n) - nu * tang(L*n) * tang(v-vhat))*dx(element_boundary=True)
     # === convection part
-    uhatup = IfPos(wind*n, tang(u), tang(uhat))    
-    a += -gradv * wind * u * dx(bonus_intorder=order)
-    a += wind*n * (uhatup * tang(v-vhat)) * dx(element_boundary=True, bonus_intorder=order)   
-    
-    
+    uhatup = IfPos(wind_h*n, tang(u), tang(uhat))    
+    a += -gradv * wind_h * u * dx(bonus_intorder=order)
+    a += wind_h*n * (uhatup * tang(v-vhat)) * dx(element_boundary=True, bonus_intorder=order)   
     f = LinearForm(fes)
+    # Newton adjoint for convection
+    if newton:
+        # uhatup_h = IfPos(wind_h*n, tang(wind_h), tang(windhat_h)) 
+        uhatup_h = wind_h
+        a += -gradv * u * wind_h * dx
+        a += u*n * uhatup_h * tang(v-vhat) * dx(element_boundary=True, bonus_intorder=order)
+        f += -gradv * wind_h * wind_h * dx
+        f += wind_h*n * uhatup_h * tang(v-vhat)*dx(element_boundary=True, bonus_intorder=order)
+        
     # === pseudo time marching for relaxation
     if pseudo_timeinv > 1e-16:
         a += pseudo_timeinv * u * v * dx
@@ -86,14 +107,6 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
          else HDiv(mesh, order=0, RT=False, dirichlet=dirichBDs)
     M0 = TangentialFacetFESpace(mesh, order=0, dirichlet=dirichBDs)
     
-
-    # Interpolate the wind
-    ''' NOTE: The Set function of RT0 GridFunction in 3D could result in NaN!!!
-    '''
-    windW = HDiv(mesh, order=max(1, order), RT=True)
-    wind_h0 = GridFunction(windW)
-    wind_h0.Set(wind)
-
     fes0 = V0 * W0 * M0 
     (L0, u0,uhat0),  (G0, v0, vhat0) = fes0.TnT()
     # gradient by row
@@ -106,9 +119,15 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
         -nu * InnerProduct(gradu0, G0) + nu * InnerProduct(L0, gradv0)) * dx
     a0 += (nu * tang(u0-uhat0) * tang(G0*n) - nu * tang(L0*n) * tang(v0-vhat0))*dx(element_boundary=True)
     # === convection part
-    uhatup0 = IfPos(wind_h0*n, tang(u0), tang(uhat0))  
-    a0 += -gradv0 * wind_h0 * u0 *dx(bonus_intorder=order)
-    a0 += wind_h0*n * uhatup0 * (tang(v0)-tang(vhat0)) * dx(element_boundary=True, bonus_intorder=order)   
+    uhatup0 = IfPos(wind_h*n, tang(u0), tang(uhat0))  
+    a0 += -gradv0 * wind_h * u0 *dx(bonus_intorder=order)
+    a0 += wind_h*n * uhatup0 * (tang(v0)-tang(vhat0)) * dx(element_boundary=True, bonus_intorder=order)   
+    # Newton adjoint for convection
+    if newton:
+        # uhatup_h = IfPos(wind_h*n, tang(wind_h), tang(windhat_h)) 
+        uhatup_h = wind_h
+        a0 += -gradv0 * u0 * wind_h * dx
+        a0 += u0*n * uhatup_h * tang(v0-vhat0) * dx(element_boundary=True, bonus_intorder=order)
     # === pseudo time marching for relaxation
     if pseudo_timeinv > 1e-16:
         a0 += pseudo_timeinv * u0 * v0 * dx
@@ -190,7 +209,9 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     # with TaskManager(pajetrace=10**8):
         for level in range(maxLevel+1):
             fes0.Update(); fes_cr.Update()
-            windW.Update(); wind_h0.Update(); wind_h0.Set(wind)
+            windW.Update(); wind_h.Update(); wind_h.Set(wind)
+            # if newton:
+            #     windhatM.Update(); windhat_h.Update(); windhat_h.Set(windhat)
             a0.Assemble()
 
             fesMass0.Assemble(); mixmass0.Assemble()
@@ -302,13 +323,6 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
     uzawaIt = 8//int(math.log10(div_penalty))
     # if drawResult:
     #     import netgen.gui
-    print("#########################################################################")
-    print(f"#  DIM: {dim}, order: {order}, uzawaIt: {uzawaIt}"), 
-    print(f"#  h_corase: 1/{iniN*2}, h_fine: 1/{2*iniN*2**maxLevel}, maxLevel: {maxLevel}")
-    print(f"#  MG nSm: {nMGSmooth}, Multi-ASP nSm: {aspSm}")
-    print(f"#  viscosity: {nu:.1e}, c_div: {div_penalty:.1e}, epsilon: {epsilon:.1e}")
-    print("#########################################################################")
-    
     
     def oneOseenSolver(aMesh, aFes, aA, aAPrc, aB, aPm_inv, aF, bdSol, prevSol=None, init:bool=True):
         # HDG STATIC CONDENSATION and SOLVED by AL uzawa
@@ -361,7 +375,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         t0 = timeit.time()
         preBlocks = blockGenerator(dim=dim, iniN=iniN, order=order, maxLevel=maxLevel)
         t1 = timeit.time()
-        print(f"Blocks pre-assembling finished in {t1-t0:.1e}.")
+        print(f"#  Blocks pre-assembling finished in {t1-t0:.1e}.")
         
         # ====== 1. Stokes solver to get initial
         t0 = timeit.time()
@@ -370,6 +384,15 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                                 c_low=0, epsilon=epsilon,order=order, 
                                 nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel,
                                 preBlocks=preBlocks)
+
+        print("#########################################################################")
+        print(f"#  DIM: {dim}, order: {order}, uzawaIt: {uzawaIt},"
+              f"MG nSm: {nMGSmooth}, Multi-ASP nSm: {aspSm}"), 
+        print(f"#  h_corase: 1/{iniN*2 if dim==2 else iniN*3}, maxLevel: {maxLevel},",
+              f"Total #{sum(fes.FreeDofs())}, Global #{sum(fes.FreeDofs(True))}")
+        print(f"#  viscosity: {nu:.1e}, c_div: {div_penalty:.1e}, epsilon: {epsilon:.1e}")
+        print("#########################################################################")
+
         # mesh, et, fes, b, pMass_inv => the same during the NS solving process
         t1 = timeit.time()
         gfu = GridFunction(fes)
@@ -380,10 +403,11 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         uhath.Set(utop, definedon=mesh.Boundaries("top"))
         uhath_bd.Set(utop, definedon=mesh.Boundaries("top"))
         
-        gfu.vec.data, _ = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, gfu_bd)
+        gfu.vec.data, prevIt = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, gfu_bd)
         t2 = timeit.time()
         uNorm0 = sqrt(Integrate(uh**2, mesh))
-        print(f"Stokes initial finished. Assem {t1-t0:.1e}, cal {t2-t1:.1e},",
+        print(f"Stokes initial finished with iteration {prevIt}.",
+              f"Assem {t1-t0:.1e}, cal {t2-t1:.1e},",
               f"uh init norm: {uNorm0:.1e}, atol: {uNorm0*rtol:.1e}")
         print("#########################################################################")
         print("#############################  PICARD IT  ###############################")
@@ -393,23 +417,25 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
 
         # ====== 2. Picard Iteration
+        newton = False
         uh_prev = uh.vec.CreateVector()
         atol = max(uNorm0 * rtol, 1e-10) # set lower bound for absolute tol
         diffNorm = uNorm0
-        avg_picardIt = 0
-        picardCnt = 1
-        MAXCNT = 80
+        avgIt = 0
+        outItCnt = 1
+        MAX_PICARD_CNT = 10
+        MAX_IT_CNT = 50
         while diffNorm > atol:
-            if picardCnt > MAXCNT:
-                print("MAX Picard Iter reached!!! Not converged!!!")
+            if outItCnt > MAX_IT_CNT:
+                print("METHOD FAILED!!! NOT CONVERGED!!!")
                 break
             t0 = timeit.time()
             mesh, et, fes, a, f, pre_ASP, b, pMass_inv = \
-                OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=uh,
+                OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=uh, windhat=uhath,
                                 c_low=0, epsilon=epsilon,order=order, 
                                 nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel,
                                 pseudo_timeinv=pseudo_timeinv,
-                                preBlocks=preBlocks)
+                                preBlocks=preBlocks, newton=newton)
             t1 = timeit.time()
             uh_prev.data = uh.vec
             gfu.vec.data, it = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, 
@@ -419,29 +445,34 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
             diffNorm = sqrt(Integrate(uh**2, mesh))
             uh.vec.data += uh_prev
             L2_divErr = sqrt(Integrate(div(uh)**2, mesh))
-            print(f"#{picardCnt:>2}, pseudo_timeinv: {pseudo_timeinv:.1e}, GMRes_it: {it:>2},", 
+            print(f"#{outItCnt:>2}, pseudo_timeinv: {pseudo_timeinv:.1e}, GMRes_it: {it:>2},", 
                   f"diff_norm = {diffNorm:.1e}, uh divErr: {L2_divErr:.1E},",
                   f"t_assem: {t1-t0:.1e}, t_cal: {t2-t1:.1e}")
             
-            ''' TODO: Adaptivity of pseudo_timeinv!!!
-            '''
-            avg_picardIt = avg_picardIt * (picardCnt-1) / picardCnt + it / picardCnt
-            picardCnt += 1
-        
+            
+            avgIt = avgIt * (outItCnt-1) / outItCnt + it / outItCnt
+            outItCnt += 1
+
+            # ====== 3. Adaptivity of pseudo_timeinv & Newton Iteration
+            if not newton:
+                if prevIt >= it + 2: # adaptivity
+                    pseudo_timeinv /= 2
+                if pseudo_timeinv < 1e-3 or diffNorm < 5e-3 or outItCnt > MAX_PICARD_CNT:
+                    # Newton start
+                    pseudo_timeinv = 0
+                    newton = True
+                    print(f"Picard Avg It: {avgIt:.1f}")
+                    print("###########################  PICARD IT END  #############################")
+                    print("#############################  NEWTON IT  ###############################")            
+            prevIt = it
+
+        print(f"Total Avg It: {avgIt:.1f}")
+        print("###########################  NEWTON IT END  #############################")
         if drawResult:
             import netgen.gui
             Draw(Norm(uh), mesh, "velNorm")
-            input("picard")  
-        print(f"Picard Avg It: {avg_picardIt:.1f}")
-        print("###########################  PICARD IT END  #############################")
-        print("#########################################################################")
+            input("result")  
 
-        
-        
-        ''' TODO!!!!!
-        '''
-        # ====== 3. Newton Iteration
-        
 
                 
 
@@ -451,7 +482,7 @@ if __name__ == '__main__':
     orderList = [1]
     for aNu in nuList:
         for aOrder in orderList:
-            for maxLevel in [10]:
-                nsSolver(dim=3, iniN=1, nu=aNu, div_penalty=1e6,
+            for maxLevel in [7]:
+                nsSolver(dim=2, iniN=1, nu=aNu, div_penalty=1e6,
                         order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=maxLevel, 
-                        pseudo_timeinv=0.5, rtol=1e-6, drawResult=True)
+                        pseudo_timeinv=0.1, rtol=1e-6, drawResult=True)
