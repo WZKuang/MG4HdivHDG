@@ -431,7 +431,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                 break
             t0 = timeit.time()
             mesh, et, fes, a, f, pre_ASP, b, pMass_inv = \
-                OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=uh, windhat=uhath,
+                OseenOperators(dim=dim, iniN=iniN, nu=nu, wind=uh,
                                 c_low=0, epsilon=epsilon,order=order, 
                                 nMGSmooth=nMGSmooth, aspSm=aspSm, maxLevel=maxLevel,
                                 pseudo_timeinv=pseudo_timeinv,
@@ -482,7 +482,7 @@ if __name__ == '__main__':
     orderList = [1]
     for aNu in nuList:
         for aOrder in orderList:
-            for maxLevel in [7]:
-                nsSolver(dim=2, iniN=1, nu=aNu, div_penalty=1e6,
+            for maxLevel in [9]:
+                nsSolver(dim=3, iniN=1, nu=aNu, div_penalty=1e6,
                         order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=maxLevel, 
                         pseudo_timeinv=0.1, rtol=1e-6, drawResult=True)
