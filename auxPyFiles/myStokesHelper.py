@@ -1,7 +1,10 @@
-# exact solutions and corresponding helpers for Stokes equations, domain = [1 x 1]^d
+# exact solutions and corresponding helpers for the
+# Stokes equations and the NS equation (Kovasznay flow)
 # by Wenzheng Kuang, 11/13/2022
 from ngsolve import *
 
+# ================ Stokes and generalized Stokes
+# domain = [1 x 1]^d
 class stokesHelper:
     def __init__(self, dim):
         self.dim = dim
@@ -91,7 +94,7 @@ class stokesHelper:
 
     # ========== convergence order check with respect to the exact sol
     def ecrCheck(self, level, fes, mesh, uh, Lh, meshRate=2, prev_uErr=0, prev_LErr=0):
-        print(f'LEVEL: {level}, ALL DOFS: {fes.ndof}, GLOBAL DOFS: {sum(fes.FreeDofs(True))}')
+        print(f'LEVEL: {level}, ALL DOFS: {sum(fes.FreeDofs())}, GLOBAL DOFS: {sum(fes.FreeDofs(True))}')
         L2_uErr = sqrt(Integrate((uh - self.u_exact) * (uh - self.u_exact), mesh))
         L2_LErr = sqrt(Integrate(InnerProduct((Lh - self.L_exact), (Lh - self.L_exact)), mesh))
         L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
@@ -103,6 +106,73 @@ class stokesHelper:
         else:
             print(f"uh L2-error: {L2_uErr:.3E}")
             print(f"Lh L2-error: {L2_LErr:.3E}")
+        print(f'uh divErr: {L2_divErr:.1E}')
+        print('==============================')
+        return (L2_uErr, L2_LErr)
+
+
+
+
+class nsHelper:
+    # Kovasznay flow
+    # domain: [-0.5, 1] x [-0.5, 0.5]
+    def __init__(self, dim, nu):
+        self.dim = dim
+        # ========== exact sol
+        # lam = -8*pi*pi/(1/nu + sqrt(1/nu/nu + 64*pi*pi))
+        lam = 1/2/nu - sqrt(1/4/nu/nu + 4*pi*pi)
+        if self.dim == 2:
+            # exact solution
+            u_exactX = 1 - exp(lam*x)*cos(2*pi*y)
+            u_exactY = lam/2/pi * exp(lam*x) * sin(2*pi*y)
+            self.u_exact = CF((u_exactX , u_exactY))
+
+            L_exactXX = -lam * exp(lam*x) * cos(2*pi*y)
+            L_exactXY = exp(lam*x) * 2 * pi * sin(2*pi*y)
+            L_exactYX = lam*lam/2/pi * exp(lam*x) * sin(2*pi*y)
+            L_exactYY = lam * exp(lam*x) * cos(2*pi*y)
+            self.L_exact = CF((L_exactXX, L_exactXY, L_exactYX, L_exactYY), dims=(2, 2))
+
+            self.p_exact = -1/2 * exp(2*lam*x)
+        
+        elif self.dim == 3:
+            # exact solution
+            u_exactX = 1 - exp(lam*x)*cos(2*pi*y)
+            u_exactY = lam/2/pi * exp(lam*x) * sin(2*pi*y)
+            self.u_exact = CF((u_exactX , u_exactY, 0))
+
+            L_exactXX = -lam * exp(lam*x) * cos(2*pi*y)
+            L_exactXY = exp(lam*x) * 2 * pi * sin(2*pi*y)
+            L_exactYX = lam*lam/2/pi * exp(lam*x) * sin(2*pi*y)
+            L_exactYY = lam * exp(lam*x) * cos(2*pi*y)
+            self.L_exact = CF((L_exactXX, L_exactXY, 0,
+                               L_exactYX, L_exactYY, 0,
+                               0, 0, 0), dims=(3, 3))
+
+            self.p_exact = -1/2 * exp(2*lam*x)
+    
+    def getExactSol(self):
+        return (self.u_exact, self.L_exact, self.p_exact)
+
+
+    # ========== rhs corresponding to the exact sol
+    def getRhs(self, fes):
+        f = LinearForm(fes)
+        return f
+
+    # ========== convergence order check with respect to the exact sol
+    def ecrCheck(self, level, mesh, uh, Lh, meshRate=2, prev_uErr=0.0, prev_LErr=0.0):
+        L2_uErr = sqrt(Integrate((uh - self.u_exact) * (uh - self.u_exact), mesh))
+        L2_LErr = sqrt(Integrate(InnerProduct((Lh - self.L_exact), (Lh - self.L_exact)), mesh))
+        L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
+        if level > 0:
+            u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
+            print(f"uh L2-error: {L2_uErr:.1E}, uh conv rate: {u_rate:.1E}")
+            L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
+            # print(f"Lh L2-error: {L2_LErr:.1E}, Lh conv rate: {L_rate:.1E}")
+        else:
+            print(f"uh L2-error: {L2_uErr:.1E}")
+            # print(f"Lh L2-error: {L2_LErr:.1E}")
         print(f'uh divErr: {L2_divErr:.1E}')
         print('==============================')
         return (L2_uErr, L2_LErr)
