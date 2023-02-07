@@ -4,7 +4,8 @@ from ngsolve import *
 from ngsolve.la import BaseMatrix
 
 
-def blockGenerator(dim:int=2, iniN:int=4, order:int=0, maxLevel:int=7):
+def mixedHDGblockGenerator(dim:int=2, mesh=None, dirichBDs=None, iniN:int=4, bisec3D:bool=True,
+                           order:int=0, maxLevel:int=7):
     from ngsolve.meshes import MakeStructured2DMesh, MakeStructured3DMesh
     # Generate pre-assembled blocks to save time, especially in 3D cases
     # result[0] -> fes0 facet/edge-patched blocks for smoothing
@@ -13,13 +14,14 @@ def blockGenerator(dim:int=2, iniN:int=4, order:int=0, maxLevel:int=7):
     # result[3] -> fes facet/edge-patched blocks for smoothing
     # result[4] -> fes facet blocks for mass mat inverse
     # ========== START of MESH ==========
-    dirichBDs = ".*"
-    if dim==2:
-        mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
-        vertexBlock = True
-    elif dim==3:
-        mesh = MakeStructured3DMesh(hexes=False, nx=iniN, ny=iniN, nz=iniN)
-        vertexBlock = False # edge-patched blocks in 3D to save memory
+    # unit_square/cube by default
+    if mesh is None:
+        dirichBDs = ".*"
+        if dim==2:
+            mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
+        elif dim==3:
+            mesh = MakeStructured3DMesh(hexes=False, nx=iniN, ny=iniN, nz=iniN)
+    vertexBlock = True if dim == 2 else False # edge-patched blocks in 3D to save memory
     # ========== END of MESH ==========
 
     V = MatrixValued(L2(mesh, order=order), mesh.dim, False)
@@ -67,10 +69,10 @@ def blockGenerator(dim:int=2, iniN:int=4, order:int=0, maxLevel:int=7):
             
             if level < maxLevel:
                 # mesh.ngmesh.Refine()
-                if mesh.dim == 2:
-                    mesh.ngmesh.Refine()
-                else:
+                if mesh.dim == 3 and bisec3D:
                     mesh.Refine(onlyonce = True)
+                else:
+                    mesh.ngmesh.Refine()         
         
         result = []
         result.append(fes0patchBlocks)

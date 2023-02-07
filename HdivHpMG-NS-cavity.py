@@ -14,11 +14,25 @@ from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
 from auxPyFiles.myMG import MultiGrid
 # from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
 from auxPyFiles.myASP import MultiASP
-from auxPyFiles.mySmoother import blockGenerator
+from auxPyFiles.mySmoother import mixedHDGblockGenerator
 import math
 
 
 
+dirichBDs = ".*"
+bisec3D = True
+def meshGenerator(dim:int=2, N:int=1, maxLevel:int=None, bisec3D:bool=True):
+    if dim==2:
+        mesh = MakeStructured2DMesh(quads=False, nx=N, ny=N)
+    elif dim==3:
+        mesh = MakeStructured3DMesh(hexes=False, nx=N, ny=N, nz=N)
+    if maxLevel is not None:
+        for _ in range(maxLevel):
+            if dim == 3 and bisec3D:
+                mesh.Refine(onlyonce=True)
+            else:
+                mesh.ngmesh.Refine()
+    return mesh
 # ============================================================================
 # ============================================================================
 # For each linearized Oseen problem, needs nested MG preconditioner 
@@ -28,12 +42,8 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
                    order:int=0, nMGSmooth:int=2, aspSm:int=4, maxLevel:int=7,
                    preBlocks=None, newton:bool=False):
 
-    # ========== START of MESH ==========
-    dirichBDs = ".*"
-    if dim==2:
-        mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN)
-    elif dim==3:
-        mesh = MakeStructured3DMesh(hexes=False, nx=iniN, ny=iniN, nz=iniN)
+    # ========== START of initial MESH ==========
+    mesh = meshGenerator(dim, iniN)
     # ========== END of MESH ==========
 
     if wind is None:
@@ -264,10 +274,10 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
             
             if level < maxLevel:
                 # mesh.ngmesh.Refine()
-                if mesh.dim == 2:
-                    mesh.ngmesh.Refine()
+                if mesh.dim == 3 and bisec3D:
+                    mesh.Refine(onlyonce=True)
                 else:
-                    mesh.Refine(onlyonce = True)
+                    mesh.ngmesh.Refine()
 
             
         
@@ -317,7 +327,8 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
 # ============================================================================
 def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
              order:int=0, nMGSmooth:int=2, aspSm:int=4, maxLevel:int=7,
-             pseudo_timeinv:float=0.0, rtol:float=1e-8, drawResult:bool=False):
+             pseudo_timeinv:float=0.0, rtol:float=1e-8, 
+             drawResult:bool=False, printIt:bool=True):
     
     epsilon = 1/nu/div_penalty
     uzawaIt = 8//int(math.log10(div_penalty))
@@ -373,7 +384,8 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
         # ====== 0. Pre-assemble needed blocks
         t0 = timeit.time()
-        preBlocks = blockGenerator(dim=dim, iniN=iniN, order=order, maxLevel=maxLevel)
+        preBlocks = mixedHDGblockGenerator(dim=dim, iniN=iniN, order=order, 
+                                           bisec3D=bisec3D, maxLevel=maxLevel)
         t1 = timeit.time()
         print(f"#  Blocks pre-assembling finished in {t1-t0:.1e}.")
         
@@ -445,9 +457,10 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
             diffNorm = sqrt(Integrate(uh**2, mesh))
             uh.vec.data += uh_prev
             L2_divErr = sqrt(Integrate(div(uh)**2, mesh))
-            print(f"#{outItCnt:>2}, pseudo_timeinv: {pseudo_timeinv:.1e}, GMRes_it: {it:>2},", 
-                  f"diff_norm = {diffNorm:.1e}, uh divErr: {L2_divErr:.1E},",
-                  f"t_assem: {t1-t0:.1e}, t_cal: {t2-t1:.1e}")
+            if printIt:
+                print(f"#{outItCnt:>2}, pseudo_timeinv: {pseudo_timeinv:.1e}, GMRes_it: {it:>2},", 
+                      f"diff_norm = {diffNorm:.1e}, uh divErr: {L2_divErr:.1E},",
+                      f"t_assem: {t1-t0:.1e}, t_cal: {t2-t1:.1e}")
             
             
             avgIt = avgIt * (outItCnt-1) / outItCnt + it / outItCnt
@@ -482,7 +495,7 @@ if __name__ == '__main__':
     orderList = [1]
     for aNu in nuList:
         for aOrder in orderList:
-            for maxLevel in [9]:
-                nsSolver(dim=3, iniN=1, nu=aNu, div_penalty=1e6,
+            for maxLevel in [7]:
+                nsSolver(dim=2, iniN=1, nu=aNu, div_penalty=1e6,
                         order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=maxLevel, 
-                        pseudo_timeinv=0.1, rtol=1e-6, drawResult=True)
+                        pseudo_timeinv=0.1, rtol=1e-6, drawResult=False)
