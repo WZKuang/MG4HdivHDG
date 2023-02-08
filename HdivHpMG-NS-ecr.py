@@ -20,7 +20,7 @@ import math
 
 
 dirichBDs = "rectangle"
-bisec3D = True
+bisec3D = False
 # domain: [-0.5, 1] x [-0.5, 0.5] x z
 def meshGenerator(dim:int=2, N:int=1, maxLevel:int=None, bisec3D:bool=True):
     if dim==2:
@@ -29,7 +29,7 @@ def meshGenerator(dim:int=2, N:int=1, maxLevel:int=None, bisec3D:bool=True):
         mesh = Mesh(geo.GenerateMesh(maxh=1/N))
     elif dim==3:
         geo = CSGeometry()
-        geo.Add(OrthoBrick(Pnt(-0.5, 0, 1),Pnt(1.5, 2, 0)).bc(dirichBDs))
+        geo.Add(OrthoBrick(Pnt(-0.5, 0, 0),Pnt(1.5, 2, 0.5)).bc(dirichBDs))
         mesh = Mesh(geo.GenerateMesh(maxh=1/N))
     if maxLevel is not None:
         for _ in range(maxLevel):
@@ -382,15 +382,17 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
     nsExact = nsHelper(dim=dim, nu=nu)
     with TaskManager():
         # ==== BD by interpolating exact solution
-        u_exact, L_exact, p_exact = nsExact.getExactSol()
+        u_exact, _, _ = nsExact.getExactSol()
 
         # ====== 0. Pre-assemble needed blocks
         t0 = timeit.time()
         mesh = meshGenerator(dim, iniN)
         preBlocks = mixedHDGblockGenerator(dim=dim, mesh=mesh, dirichBDs=dirichBDs,
-                                           iniN=iniN, order=order, maxLevel=maxLevel)
+                                           iniN=iniN, order=order, maxLevel=maxLevel,
+                                           bisec3D=bisec3D)
         t1 = timeit.time()
-        print(f"#  Blocks pre-assembling finished in {t1-t0:.1e}.")
+        if printIt:
+            print(f"#  Blocks pre-assembling finished in {t1-t0:.1e}.")
         
         # ====== 1. Stokes solver to get initial
         t0 = timeit.time()
@@ -415,10 +417,10 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         gfu_bd = GridFunction(fes)
         _, uh_bd, uhath_bd = gfu_bd.components
         # homo dirichlet BC
-        uh.Set(u_exact, definedon=mesh.Boundaries("rectangle"))
-        uhath.Set(u_exact, definedon=mesh.Boundaries("rectangle"))
-        uh_bd.Set(u_exact, definedon=mesh.Boundaries("rectangle"))
-        uhath_bd.Set(u_exact, definedon=mesh.Boundaries("rectangle"))
+        uh.Set(u_exact, definedon=mesh.Boundaries(dirichBDs))
+        uhath.Set(u_exact, definedon=mesh.Boundaries(dirichBDs))
+        uh_bd.Set(u_exact, definedon=mesh.Boundaries(dirichBDs))
+        uhath_bd.Set(u_exact, definedon=mesh.Boundaries(dirichBDs))
         # if drawResult:
         #     Draw(Norm(uh), mesh, "velNorm")
         #     input('init BDs')
@@ -444,7 +446,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         diffNorm = uNorm0
         avgIt = 0
         outItCnt = 1
-        MAX_PICARD_CNT = 10
+        MAX_PICARD_CNT = 15
         MAX_IT_CNT = 50
         while diffNorm > atol:
             if outItCnt > MAX_IT_CNT:
@@ -475,11 +477,9 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
             avgIt = avgIt * (outItCnt-1) / outItCnt + it / outItCnt
             outItCnt += 1
 
-            # ====== 3. Adaptivity of pseudo_timeinv & Newton Iteration
+            # ====== 3. Newton Iteration
             if not newton:
-                if prevIt >= it + 2: # adaptivity
-                    pseudo_timeinv /= 2
-                if pseudo_timeinv < 1e-3 or diffNorm < 5e-3 or outItCnt > MAX_PICARD_CNT:
+                if diffNorm < 5e-3 or outItCnt > MAX_PICARD_CNT:
                     # Newton start
                     pseudo_timeinv = 0
                     newton = True
@@ -496,7 +496,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
             import netgen.gui
             Draw(Norm(uh), mesh, "velNorm")
             input("result") 
-        return mesh, uh, Lh 
+        return mesh, uh
 
 
                 
@@ -505,16 +505,19 @@ if __name__ == '__main__':
     dim = 2
     meshRate = sqrt(2) if bisec3D and dim==3 else 2
     # nuList = [1e-2, 1e-3, 5e-4]
-    nuList = [1]
-    orderList = [1]
+    nuList = [1, 1e1, 1e2, 1e3]
+    orderList = [0, 1, 2, 3]
     for aNu in nuList:
         for aOrder in orderList:
             nsExact = nsHelper(dim, aNu)
-            L2_uErr, L2_LErr = 0, 0
-            for level in range(6):
-                mesh, uh, Lh = nsSolver(dim, iniN=1, nu=aNu, div_penalty=1e6,
+            L2_uErr, L2_graduErr = 0, 0
+            for level in range(7):
+                mesh, uh = nsSolver(dim, iniN=1, nu=aNu, div_penalty=1e6,
                                         order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=level, 
                                         pseudo_timeinv=0, rtol=1e-6, 
                                         printIt=False, drawResult=False)
-                L2_uErr, L2_LErr = nsExact.ecrCheck(level, mesh, uh, Lh, meshRate,
-                                                    prev_LErr=L2_LErr, prev_uErr=L2_uErr)
+                L2_uErr, L2_graduErr = nsExact.ecrCheck(level, mesh, uh, Grad(uh), meshRate,
+                                                    prev_LErr=L2_graduErr, prev_uErr=L2_uErr)
+            print("============================================")
+            print("============================================")
+

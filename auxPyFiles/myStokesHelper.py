@@ -119,7 +119,7 @@ class nsHelper:
     def __init__(self, dim, nu):
         self.dim = dim
         # ========== exact sol
-        # lam = -8*pi*pi/(1/nu + sqrt(1/nu/nu + 64*pi*pi))
+        # L := Grad(u) here
         lam = 1/2/nu - sqrt(1/4/nu/nu + 4*pi*pi)
         if self.dim == 2:
             # exact solution
@@ -169,10 +169,10 @@ class nsHelper:
             u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
             print(f"uh L2-error: {L2_uErr:.1E}, uh conv rate: {u_rate:.1E}")
             L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
-            # print(f"Lh L2-error: {L2_LErr:.1E}, Lh conv rate: {L_rate:.1E}")
+            print(f"Grad(uh) L2-error: {L2_LErr:.1E}, Grad(uh) conv rate: {L_rate:.1E}")
         else:
             print(f"uh L2-error: {L2_uErr:.1E}")
-            # print(f"Lh L2-error: {L2_LErr:.1E}")
+            print(f"Grad(uh) L2-error: {L2_LErr:.1E}")
         print(f'uh divErr: {L2_divErr:.1E}')
         print('==============================')
         return (L2_uErr, L2_LErr)

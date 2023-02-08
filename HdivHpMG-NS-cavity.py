@@ -384,10 +384,12 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
         # ====== 0. Pre-assemble needed blocks
         t0 = timeit.time()
-        preBlocks = mixedHDGblockGenerator(dim=dim, iniN=iniN, order=order, 
-                                           bisec3D=bisec3D, maxLevel=maxLevel)
+        preBlocks = mixedHDGblockGenerator(dim=dim, mesh=mesh, dirichBDs=dirichBDs,
+                                           iniN=iniN, order=order, maxLevel=maxLevel,
+                                           bisec3D=bisec3D)
         t1 = timeit.time()
-        print(f"#  Blocks pre-assembling finished in {t1-t0:.1e}.")
+        if printIt:
+            print(f"#  Blocks pre-assembling finished in {t1-t0:.1e}.")
         
         # ====== 1. Stokes solver to get initial
         t0 = timeit.time()
@@ -418,11 +420,12 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         gfu.vec.data, prevIt = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, gfu_bd)
         t2 = timeit.time()
         uNorm0 = sqrt(Integrate(uh**2, mesh))
-        print(f"Stokes initial finished with iteration {prevIt}.",
+        if printIt:
+            print(f"Stokes initial finished with iteration {prevIt}.",
               f"Assem {t1-t0:.1e}, cal {t2-t1:.1e},",
               f"uh init norm: {uNorm0:.1e}, atol: {uNorm0*rtol:.1e}")
-        print("#########################################################################")
-        print("#############################  PICARD IT  ###############################")
+            print("#########################################################################")
+            print("#############################  PICARD IT  ###############################")
         # if drawResult:
         #     Draw(Norm(uh), mesh, "velNorm")
         #     input('init Stokes')
@@ -435,7 +438,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         diffNorm = uNorm0
         avgIt = 0
         outItCnt = 1
-        MAX_PICARD_CNT = 10
+        MAX_PICARD_CNT = 15
         MAX_IT_CNT = 50
         while diffNorm > atol:
             if outItCnt > MAX_IT_CNT:
@@ -466,21 +469,21 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
             avgIt = avgIt * (outItCnt-1) / outItCnt + it / outItCnt
             outItCnt += 1
 
-            # ====== 3. Adaptivity of pseudo_timeinv & Newton Iteration
+            # ====== 3. Newton Iteration
             if not newton:
-                if prevIt >= it + 2: # adaptivity
-                    pseudo_timeinv /= 2
-                if pseudo_timeinv < 1e-3 or diffNorm < 5e-3 or outItCnt > MAX_PICARD_CNT:
+                if diffNorm < 5e-3 or outItCnt > MAX_PICARD_CNT:
                     # Newton start
                     pseudo_timeinv = 0
                     newton = True
-                    print(f"Picard Avg It: {avgIt:.1f}")
-                    print("###########################  PICARD IT END  #############################")
-                    print("#############################  NEWTON IT  ###############################")            
+                    if printIt:
+                        print(f"Picard Avg It: {avgIt:.1f}")
+                        print("###########################  PICARD IT END  #############################")
+                        print("#############################  NEWTON IT  ###############################")            
             prevIt = it
 
-        print(f"Total Avg It: {avgIt:.1f}")
-        print("###########################  NEWTON IT END  #############################")
+        if printIt:
+            print(f"Total Avg It: {avgIt:.1f}")
+            print("###########################  NEWTON IT END  #############################")
         if drawResult:
             import netgen.gui
             Draw(Norm(uh), mesh, "velNorm")
@@ -496,6 +499,6 @@ if __name__ == '__main__':
     for aNu in nuList:
         for aOrder in orderList:
             for maxLevel in [7]:
-                nsSolver(dim=2, iniN=1, nu=aNu, div_penalty=1e6,
+                nsSolver(dim=3, iniN=1, nu=aNu, div_penalty=1e6,
                         order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=maxLevel, 
-                        pseudo_timeinv=0.1, rtol=1e-6, drawResult=False)
+                        pseudo_timeinv=0, rtol=1e-6, drawResult=False)
