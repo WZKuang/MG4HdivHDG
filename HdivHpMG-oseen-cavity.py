@@ -12,9 +12,8 @@ from netgen.geom2d import unit_square
 # from netgen.csg import unit_cube
 # customized functions
 from prol import meshTopology, FacetProlongationTrig2 #, FacetProlongationTet2
-from auxPyFiles.myMG import MultiGrid
 # from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
-from auxPyFiles.myASP import MultiASP
+from auxPyFiles.mySolvers import MultiASP, MultiGrid
 
 
 def HdivHDGOseen(dim=2, iniN=4, nu=1e-3, wind=CF((1, 0)), c_low=0, initialSol=None, epsilon=1e-6,

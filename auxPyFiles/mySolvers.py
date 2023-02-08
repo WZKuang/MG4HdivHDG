@@ -1,9 +1,119 @@
+# Head files for solver classes and functions
+# 1. simple iterative solver
+# 2. multiplicative auxiliary space solver
+# 3. MG for CR and facet element
+# 4. Uzawa iteraition process for HDG static condensation
+from ngsolve import *
+import numpy as np
+from ngsolve.krylovspace import LinearSolver
 from ngsolve.la import BaseMatrix
 from ngsolve import BitArray, CreateVVector, Projector
+from ngsolve.krylovspace import GMResSolver
+
+# ============================================================ #
+# ============================================================ #
+class IterSolver(LinearSolver):
+    # 1. simple iterative solver
+    def __init__(self, *args, freedofs, **kargs):
+        super().__init__(*args, **kargs)
+        self.freedofs = freedofs
+
+    def _SolveImpl(self, rhs: BaseVector, sol: BaseVector):
+        proj = Projector(self.freedofs, True)
+        r = rhs.CreateVector()
+        d = rhs.CreateVector()
+        r.data = rhs - self.mat * sol
+        d.data = proj * r
+        # L2 norm for residual checking here
+        res_norm = sqrt(InnerProduct(d, d))
+        if self.CheckResidual(res_norm):
+            return
+        
+        while True:
+            # self.pre => approximation of A inverse
+            sol.data += self.pre * r
+
+            r.data = rhs - self.mat * sol
+            d.data = proj * r
+            prev_res_norm = res_norm
+            res_norm = sqrt(InnerProduct(d, d))
+            # if res_norm > prev_res_norm:
+            #     print('Iterative solver NOT CONVERGING!!! STOPPED!!!')
+            #     return
+            # else:
+            #     # print(f'Converge rate: {res_norm / prev_res_norm}')
+            #     pass
+            if self.CheckResidual(res_norm):
+                return
 
 
-# multigrid with variable smoothing
+
+
+
+# ============================================================ #
+# ============================================================ #
+class MultiASP(BaseMatrix):
+    # 2. multiplicative auxiliary solver
+    def __init__ (self, mat, activeDOFs, coarseSolver, smoother, nSm=1, smType="gs", damp=0.5):
+        super().__init__()
+        self.mat = mat
+        self.activeDOFs = activeDOFs
+        self.coarseSol = coarseSolver
+        self.sm = smoother # assumed GS
+        self.nSm = nSm
+        self.smType = smType
+        self.damp = damp
+
+    def Height(self):
+        return self.mat.height
+    def Width(self):
+        return self.mat.width
+
+    def Mult(self, b, rho): # b => rhs; rho => sol
+        # initialize to zero
+        rho[:] = 0
+        # set-zero V dofs in b??? TODO
+        residual = b.CreateVector()
+        correction = b.CreateVector() # auxiliary space correction
+
+        # ========== pre-smoothing
+        if self.smType == "gs":
+            for _ in range(self.nSm):
+                self.sm.Smooth(rho, b)
+            residual.data = b - self.mat * rho
+        else: # Jacobi, additive
+            residual.data = b
+            for _ in range(self.nSm):
+                rho.data += self.damp * self.sm * residual
+                residual.data = b - self.mat * rho
+
+        # ========== coarse grid correction
+        # Projector project out inactive dofs on fine level
+        residual.data = Projector(self.activeDOFs, True) * residual
+        correction.data = self.coarseSol * residual
+        ### Project out inactive DOFs
+        correction.data = Projector(self.activeDOFs, True) * correction
+        
+        rho.data += correction
+    
+        # ========== post-smoothing
+        if self.smType == "gs":
+            for _ in range(self.nSm):
+                self.sm.SmoothBack(rho, b)
+        else: # Jacobi, additive
+            for _ in range(self.nSm):
+                residual.data = b - self.mat * rho
+                rho.data += self.damp * self.sm * residual
+
+
+
+
+
+
+# ============================================================ #
+# ============================================================ #
 class MultiGrid(BaseMatrix):
+    # 3. MG for CR and facet element
     def __init__ (self, mat, prol, coarsedofs, nc, w1=0.9, sm="gs", var=False,
             nsmooth=1, wcycle=False, he=False, dim = 1, mProject = None):
         super(MultiGrid, self).__init__()
@@ -163,3 +273,54 @@ class MultiGrid(BaseMatrix):
         else:
             # p1 problem on the coarsest mesh
             rho.data = self.invcoarseproblem * b
+
+
+
+
+
+
+
+# ============================================================ #
+# ============================================================ #
+def staticUzawa(aMesh, aFes, order, aA, aAPrc, 
+                aB, aPm_inv, aF, epsilon, uzawaIt, 
+                bdSol, prevSol=None, init:bool=True):
+        # 4. Uzawa iteraition process for HDG static condensation,
+        #    solved with preconditioned GMResSolver
+        Q = L2(aMesh, order=order)
+        p_prev = GridFunction(Q)
+        p_prev.vec.data[:] = 0
+        solTmp0 = bdSol.vec.CreateVector()
+        solTmp1 = bdSol.vec.CreateVector()
+        ''' NOTE: GMResSolver calculate the delta based on the current provided (global) sol.
+                  It will deal with rhs with rhs -= a.mat * solTmp0,
+                  So in this static condensation process, solTmp0 should not contain BD data,
+                  otherwise cause wrong sol near BDs.
+        '''
+        it = 0
+        with TaskManager():
+            if not init:
+                solTmp0.data = Projector(aFes.FreeDofs(True), True) * prevSol.vec
+            for it_u in range(uzawaIt):
+                solTmp0.data = Projector(aFes.FreeDofs(True), True) * solTmp0
+                # ====== static condensation and solve
+                rhs = aF.vec.CreateVector()
+                rhs.data = aF.vec - aA.mat * bdSol.vec
+                rhs.data += -aB.mat * p_prev.vec
+                # # static condensation
+                rhs.data += aA.harmonic_extension_trans * rhs
+                inv_fes = GMResSolver(aA.mat, aAPrc, printrates=False, 
+                                      tol=1e-8, atol=1e-10, maxiter=100)
+                # use prev uzawa sol as initial guess
+                inv_fes.Solve(rhs=rhs, sol=solTmp0, initialize=init if it_u==0 else False)
+                it += inv_fes.iterations
+                solTmp1.data = bdSol.vec.data + solTmp0
+
+                solTmp1.data += aA.harmonic_extension * solTmp1
+                solTmp1.data += aA.inner_solve * rhs
+                # update pressure
+                p_prev.vec.data += 1/epsilon * (aPm_inv @ aB.mat.T * solTmp1.data)
+        
+        it //= uzawaIt
+        return solTmp1.data, it
+

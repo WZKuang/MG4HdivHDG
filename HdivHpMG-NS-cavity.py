@@ -11,9 +11,8 @@ from ngsolve.meshes import MakeStructured2DMesh, MakeStructured3DMesh
 # from netgen.csg import unit_cube
 # customized functions
 from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
-from auxPyFiles.myMG import MultiGrid
 # from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
-from auxPyFiles.myASP import MultiASP
+from auxPyFiles.mySolvers import MultiASP, MultiGrid, staticUzawa
 from auxPyFiles.mySmoother import mixedHDGblockGenerator
 import math
 
@@ -334,46 +333,6 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
     uzawaIt = 8//int(math.log10(div_penalty))
     # if drawResult:
     #     import netgen.gui
-    
-    def oneOseenSolver(aMesh, aFes, aA, aAPrc, aB, aPm_inv, aF, bdSol, prevSol=None, init:bool=True):
-        # HDG STATIC CONDENSATION and SOLVED by AL uzawa
-        Q = L2(aMesh, order=order)
-        p_prev = GridFunction(Q)
-        p_prev.vec.data[:] = 0
-        solTmp = bdSol.vec.CreateVector()
-        ''' NOTE: GMResSolver calculate the delta based on the current provided (global) sol.
-                  It will deal with rhs with rhs -= a.mat * solTmp,
-                  So in this static condensation process, solTmp should not contain BD data,
-                  otherwise cause wrong sol near BDs.
-        '''
-        it = 0
-        with TaskManager():
-            if not init:
-                solTmp.data = Projector(aFes.FreeDofs(True), True) * prevSol.vec
-            for it_u in range(uzawaIt):
-                solTmp.data = Projector(aFes.FreeDofs(True), True) * solTmp
-                # ====== static condensation and solve
-                rhs = aF.vec.CreateVector()
-                rhs.data = aF.vec - aA.mat * bdSol.vec
-                rhs.data += -aB.mat * p_prev.vec
-                # # static condensation
-                rhs.data += aA.harmonic_extension_trans * rhs
-                inv_fes = GMResSolver(aA.mat, aAPrc, printrates=False, 
-                                      tol=1e-8, atol=1e-10, maxiter=100)
-                # use prev uzawa sol as initial guess
-                inv_fes.Solve(rhs=rhs, sol=solTmp, initialize=init if it_u==0 else False)
-                it += inv_fes.iterations
-
-                solTmp.data += aA.harmonic_extension * solTmp
-                solTmp.data += aA.inner_solve * rhs
-                # update pressure
-                p_prev.vec.data += 1/epsilon * (aPm_inv @ aB.mat.T * solTmp.data)
-        
-        it //= uzawaIt
-        return bdSol.vec.data+Projector(fes.FreeDofs(True), True)*solTmp.data, it
-        
-
-
     # ===================== START OF NS SOLVING ====================
     with TaskManager():
         # ==== Upper BD
@@ -413,11 +372,13 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         Lh, uh, uhath = gfu.components
         gfu_bd = GridFunction(fes)
         _, _, uhath_bd = gfu_bd.components
-        # homo dirichlet BC
+        # dirichlet BC
         uhath.Set(utop, definedon=mesh.Boundaries("top"))
         uhath_bd.Set(utop, definedon=mesh.Boundaries("top"))
         
-        gfu.vec.data, prevIt = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, gfu_bd)
+        gfu.vec.data, prevIt = staticUzawa(aMesh=mesh, aFes=fes, order=order, aA=a,
+                                        aAPrc=pre_ASP, aB=b, aPm_inv=pMass_inv, aF=f,
+                                        epsilon=epsilon, uzawaIt=uzawaIt, bdSol=gfu_bd)
         t2 = timeit.time()
         uNorm0 = sqrt(Integrate(uh**2, mesh))
         if printIt:
@@ -453,8 +414,10 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                                 preBlocks=preBlocks, newton=newton)
             t1 = timeit.time()
             uh_prev.data = uh.vec
-            gfu.vec.data, it = oneOseenSolver(mesh, fes, a, pre_ASP, b, pMass_inv, f, 
-                                              gfu_bd, gfu, init=False) 
+            gfu.vec.data, it = staticUzawa(aMesh=mesh, aFes=fes, order=order, aA=a,
+                                        aAPrc=pre_ASP, aB=b, aPm_inv=pMass_inv, aF=f,
+                                        epsilon=epsilon, uzawaIt=uzawaIt, bdSol=gfu_bd,
+                                        prevSol=gfu, init=False) 
             t2 = timeit.time()
             uh.vec.data -= uh_prev
             diffNorm = sqrt(Integrate(uh**2, mesh))

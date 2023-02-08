@@ -11,9 +11,8 @@ from netgen.geom2d import SplineGeometry
 from netgen.csg import CSGeometry, Plane, OrthoBrick, Pnt, Vec
 # customized functions
 from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
-from auxPyFiles.myMG import MultiGrid
 from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
-from auxPyFiles.myASP import MultiASP
+from auxPyFiles.mySolvers import MultiASP, MultiGrid
 
 import sys
 if len(sys.argv) < 5:

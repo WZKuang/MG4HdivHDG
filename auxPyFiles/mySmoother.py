@@ -1,5 +1,6 @@
 # Head files for blocks and GS smoother
 # if no hacker made to ngsolve source file, use functions here
+
 from ngsolve import *
 from ngsolve.la import BaseMatrix
 

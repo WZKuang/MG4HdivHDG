@@ -11,11 +11,9 @@ from ngsolve.meshes import MakeStructured2DMesh, MakeStructured3DMesh
 # from netgen.csg import unit_cube
 # customized functions
 from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
-from auxPyFiles.myMG import MultiGrid
 from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
 from auxPyFiles.myStokesHelper import stokesHelper
-from auxPyFiles.myASP import MultiASP
-from auxPyFiles.myIterSolver import IterSolver
+from auxPyFiles.mySolvers import IterSolver, MultiASP, MultiGrid
 
 import sys
 if len(sys.argv) < 6:
