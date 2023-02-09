@@ -17,7 +17,7 @@ from auxPyFiles.mySmoother import mixedHDGblockGenerator
 import math
 
 
-L = 3
+L = 4
 dirichBDs = "wall|inlet"
 bisec3D = True
 def meshGenerator(dim:int=2, N:int=1, maxLevel:int=None, bisec3D:bool=True):
@@ -242,6 +242,7 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
         for level in range(maxLevel+1):
             fes0.Update(); fes_cr.Update()
             gfout.Update()
+            gfout.Set(1, definedon=mesh.Boundaries("outlet"))
             windW.Update(); wind_h.Update(); wind_h.Set(wind)
             # if newton:
             #     windhatM.Update(); windhat_h.Update(); windhat_h.Set(windhat)
@@ -328,6 +329,7 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
         pre_ASP = MultiASP(a.mat, fes.FreeDofs(True), lowOrderSolver, 
                             smoother=aspSmoother,
                             nSm=0 if order==0 else aspSm)
+        # pre_ASP = a.mat.Inverse(fes.FreeDofs(True), inverse='umfpack')
         # ========== Secondary Operators for Uzawa
         Q.Update()
         b.Assemble() #b += - p * div(v) * dx
@@ -482,11 +484,11 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
 if __name__ == '__main__':
     # nuList = [1e-2, 1e-3, 5e-4]
-    nuList = [1e-1]
+    nuList = [1e-2]
     orderList = [1]
     for aNu in nuList:
         for aOrder in orderList:
-            for maxLevel in [5]:
-                nsSolver(dim=2, iniN=1, nu=aNu, div_penalty=1e6,
+            for maxLevel in [7]:
+                nsSolver(dim=3, iniN=1, nu=aNu, div_penalty=1e8,
                         order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=maxLevel, 
-                        pseudo_timeinv=0.5, rtol=1e-6, drawResult=True)
+                        pseudo_timeinv=0, rtol=1e-6, drawResult=True)
