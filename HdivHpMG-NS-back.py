@@ -483,12 +483,16 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                 
 
 if __name__ == '__main__':
+    dim = 2
+    nSM = 1 if dim==2 else 2
+    meshRate = sqrt(2) if bisec3D and dim==3 else 2
     # nuList = [1e-2, 1e-3, 5e-4]
-    nuList = [1e-2]
-    orderList = [1]
+    nuList = [1e-2, 1e-3, 5e-4, 1e-4]
+    orderList = [0, 1, 2, 3]
+    
     for aNu in nuList:
         for aOrder in orderList:
-            for maxLevel in [7]:
-                nsSolver(dim=3, iniN=1, nu=aNu, div_penalty=1e8,
-                        order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=maxLevel, 
-                        pseudo_timeinv=0, rtol=1e-6, drawResult=True)
+            for maxLevel in [4, 5, 6, 7]:
+                nsSolver(dim=dim, iniN=1, nu=aNu, div_penalty=1e8,
+                        order=aOrder, nMGSmooth=nSM, aspSm=nSM, maxLevel=maxLevel, 
+                        pseudo_timeinv=0, rtol=1e-8, drawResult=False)

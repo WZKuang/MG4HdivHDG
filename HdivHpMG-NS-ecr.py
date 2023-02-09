@@ -24,11 +24,11 @@ bisec3D = False
 def meshGenerator(dim:int=2, N:int=1, maxLevel:int=None, bisec3D:bool=True):
     if dim==2:
         geo = SplineGeometry()
-        geo.AddRectangle((-0.5, 0),(1.5, 2),bc=dirichBDs)
+        geo.AddRectangle((-0.5, -0.5),(1, 0.5),bc=dirichBDs)
         mesh = Mesh(geo.GenerateMesh(maxh=1/N))
     elif dim==3:
         geo = CSGeometry()
-        geo.Add(OrthoBrick(Pnt(-0.5, 0, 0),Pnt(1.5, 2, 0.5)).bc(dirichBDs))
+        geo.Add(OrthoBrick(Pnt(-0.5, -0.5, 0),Pnt(1, 0.5, 0.5)).bc(dirichBDs))
         mesh = Mesh(geo.GenerateMesh(maxh=1/N))
     if maxLevel is not None:
         for _ in range(maxLevel):
@@ -465,6 +465,8 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
 if __name__ == '__main__':
     dim = 2
+    nSM = 1 if dim==2 else 2
+    levels = 7 if dim==2 else 4
     meshRate = sqrt(2) if bisec3D and dim==3 else 2
     # nuList = [1e-2, 1e-3, 5e-4]
     nuList = [1, 1e-1, 1e-2, 1e-3]
@@ -472,11 +474,11 @@ if __name__ == '__main__':
     for aNu in nuList:
         for aOrder in orderList:
             nsExact = nsHelper(dim, aNu)
-            L2_uErr, L2_graduErr = 0, 0
-            for level in range(5):
-                mesh, uh = nsSolver(dim, iniN=1, nu=aNu, div_penalty=1e6,
-                                        order=aOrder, nMGSmooth=2, aspSm=2, maxLevel=level, 
-                                        pseudo_timeinv=0, rtol=1e-6, 
+            L2_uErr, L2_graduErr = 0, 
+            for level in range(levels):
+                mesh, uh = nsSolver(dim, iniN=1, nu=aNu, div_penalty=1e8,
+                                        order=aOrder, nMGSmooth=nSM, aspSm=nSM, maxLevel=level, 
+                                        pseudo_timeinv=0, rtol=1e-8, 
                                         printIt=False, drawResult=False)
                 L2_uErr, L2_graduErr = nsExact.ecrCheck(level, mesh, uh, Grad(uh), meshRate,
                                                     prev_LErr=L2_graduErr, prev_uErr=L2_uErr)

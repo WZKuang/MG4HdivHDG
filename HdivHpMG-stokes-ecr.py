@@ -27,7 +27,7 @@ precond = bool(int(sys.argv[5]))
 if dim != 2 and dim != 3:
     print('WRONG DIMENSION!'); exit(1)
 
-iniN = 2
+iniN = 1
 maxdofs = 5e7
 maxLevel = 6
 epsilon = 1e-4
