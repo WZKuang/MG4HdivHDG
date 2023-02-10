@@ -334,7 +334,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
              drawResult:bool=False, printIt:bool=True):
     
     epsilon = 1/nu/div_penalty
-    uzawaIt = 8//int(math.log10(div_penalty))
+    uzawaIt = 12//int(math.log10(div_penalty))
     # if drawResult:
     #     import netgen.gui
     # ===================== START OF NS SOLVING ====================
@@ -458,7 +458,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
             import netgen.gui
             Draw(Norm(uh), mesh, "velNorm")
             input("result") 
-        return mesh, uh
+        return mesh, uh, Lh
 
 
                 
@@ -474,14 +474,21 @@ if __name__ == '__main__':
     for aNu in nuList:
         for aOrder in orderList:
             nsExact = nsHelper(dim, aNu)
-            L2_uErr, L2_graduErr = 0, 
+            L2_uErr, L2_graduErr = 0, 0
             for level in range(levels):
-                mesh, uh = nsSolver(dim, iniN=1, nu=aNu, div_penalty=1e8,
+                mesh, uh, Lh = nsSolver(dim, iniN=1, nu=aNu, div_penalty=1e6,
                                         order=aOrder, nMGSmooth=nSM, aspSm=nSM, maxLevel=level, 
                                         pseudo_timeinv=0, rtol=1e-8, 
                                         printIt=False, drawResult=False)
-                L2_uErr, L2_graduErr = nsExact.ecrCheck(level, mesh, uh, Grad(uh), meshRate,
+                L2_uErr, L2_graduErr = nsExact.ecrCheck(level, mesh, uh, Lh, meshRate,
                                                     prev_LErr=L2_graduErr, prev_uErr=L2_uErr)
+            vtk = VTKOutput(ma=mesh,
+                            coefs=[uh],
+                            names = ["velocity"],
+                            filename="result",
+                            subdivision=3)
+            # Exporting the results:
+            vtk.Do()
             print("============================================")
             print("============================================")
 
