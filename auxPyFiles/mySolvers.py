@@ -299,10 +299,11 @@ def staticUzawa(aMesh, aFes, order, aA, aAPrc,
         '''
         it = 0
         with TaskManager():
-            if not init:
-                solTmp0.data = Projector(aFes.FreeDofs(True), True) * prevSol.vec
+            # if not init:
+            #     solTmp0.data = Projector(aFes.FreeDofs(True), True) * prevSol.vec
             for it_u in range(uzawaIt):
-                solTmp0.data = Projector(aFes.FreeDofs(True), True) * solTmp0
+                if not init:
+                    solTmp0.data = Projector(aFes.FreeDofs(True), True) * prevSol.vec
                 # ====== static condensation and solve
                 rhs = aF.vec.CreateVector()
                 rhs.data = aF.vec - aA.mat * bdSol.vec
@@ -314,6 +315,7 @@ def staticUzawa(aMesh, aFes, order, aA, aAPrc,
                 # use prev uzawa sol as initial guess
                 inv_fes.Solve(rhs=rhs, sol=solTmp0, initialize=init if it_u==0 else False)
                 it += inv_fes.iterations
+                print(inv_fes.iterations)
                 solTmp1.data = bdSol.vec.data + solTmp0
 
                 solTmp1.data += aA.harmonic_extension * solTmp1

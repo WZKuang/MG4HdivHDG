@@ -330,7 +330,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
              drawResult:bool=False, printIt:bool=True):
     
     epsilon = 1/nu/div_penalty
-    uzawaIt = 8//int(math.log10(div_penalty))
+    uzawaIt = 12//int(math.log10(div_penalty))
     # if drawResult:
     #     import netgen.gui
     # ===================== START OF NS SOLVING ====================
@@ -458,15 +458,16 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
 if __name__ == '__main__':
     dim = 2
-    nSM = 1 if dim==2 else 2
+    nSM = 2 #1 if dim==2 else 2
     meshRate = sqrt(2) if bisec3D and dim==3 else 2
     # nuList = [1e-2, 1e-3, 5e-4]
-    nuList = [1e-2, 1e-3, 5e-4, 1e-4]
-    orderList = [0, 1, 2, 3]
+    # nuList = [1e-2, 1e-3, 5e-4, 1e-4]
+    nuList = [1e-4]
+    orderList = [1]
     
     for aNu in nuList:
         for aOrder in orderList:
-            for maxLevel in [4, 5, 6, 7]:
+            for maxLevel in range(6, 8):
                 nsSolver(dim=dim, iniN=1, nu=aNu, div_penalty=1e8,
                         order=aOrder, nMGSmooth=nSM, aspSm=nSM, maxLevel=maxLevel, 
-                        pseudo_timeinv=0, rtol=1e-8, drawResult=False)
+                        pseudo_timeinv=0.1, rtol=1e-8, drawResult=False)
