@@ -400,8 +400,8 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         diffNorm = uNorm0
         avgIt = 0
         outItCnt = 1
-        MAX_PICARD_CNT = 15
-        MAX_IT_CNT = 50
+        MAX_PICARD_CNT = 30
+        MAX_IT_CNT = 70
         while diffNorm > atol:
             if outItCnt > MAX_IT_CNT:
                 print("METHOD FAILED!!! NOT CONVERGED!!!")
@@ -435,18 +435,19 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
             # ====== 3. Newton Iteration
             if not newton:
-                if diffNorm < 5e-3 or outItCnt > MAX_PICARD_CNT:
+                if diffNorm < 1e-4 or outItCnt > MAX_PICARD_CNT:
                     # Newton start
                     pseudo_timeinv = 0
                     newton = True
                     if printIt:
                         print(f"Picard Avg It: {avgIt:.1f}")
                         print("###########################  PICARD IT END  #############################")
-                        print("#############################  NEWTON IT  ###############################")            
-            prevIt = it
+                        print("#############################  NEWTON IT  ###############################")
+                    outItCnt = 1
+                    avgIt = 0         
 
         if printIt:
-            print(f"Total Avg It: {avgIt:.1f}")
+            print(f"Newton Avg It: {avgIt:.1f}")
             print("###########################  NEWTON IT END  #############################")
         if drawResult:
             import netgen.gui
@@ -458,16 +459,15 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
 if __name__ == '__main__':
     dim = 2
-    nSM = 2 #1 if dim==2 else 2
+    nSM = 1 if dim==2 else 2
     meshRate = sqrt(2) if bisec3D and dim==3 else 2
     # nuList = [1e-2, 1e-3, 5e-4]
-    # nuList = [1e-2, 1e-3, 5e-4, 1e-4]
-    nuList = [1e-4]
-    orderList = [1]
+    nuList = [1, 1e-2, 1e-3, 1e-4]
+    orderList = [0, 1, 2, 3]
     
     for aNu in nuList:
         for aOrder in orderList:
-            for maxLevel in range(6, 8):
-                nsSolver(dim=dim, iniN=1, nu=aNu, div_penalty=1e8,
+            for maxLevel in range(5, 9):
+                nsSolver(dim=dim, iniN=1, nu=aNu, div_penalty=1e6,
                         order=aOrder, nMGSmooth=nSM, aspSm=nSM, maxLevel=maxLevel, 
-                        pseudo_timeinv=0.1, rtol=1e-8, drawResult=False)
+                        pseudo_timeinv=0, rtol=1e-8, drawResult=False)

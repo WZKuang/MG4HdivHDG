@@ -311,11 +311,11 @@ def staticUzawa(aMesh, aFes, order, aA, aAPrc,
                 # # static condensation
                 rhs.data += aA.harmonic_extension_trans * rhs
                 inv_fes = GMResSolver(aA.mat, aAPrc, printrates=False, 
-                                      tol=1e-8, atol=1e-10, maxiter=100)
+                                      tol=1e-8, atol=1e-10, maxiter=200)
                 # use prev uzawa sol as initial guess
                 inv_fes.Solve(rhs=rhs, sol=solTmp0, initialize=init if it_u==0 else False)
                 it += inv_fes.iterations
-                print(inv_fes.iterations)
+                # print(inv_fes.iterations)
                 solTmp1.data = bdSol.vec.data + solTmp0
 
                 solTmp1.data += aA.harmonic_extension * solTmp1
