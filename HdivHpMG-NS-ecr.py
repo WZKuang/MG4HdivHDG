@@ -406,8 +406,8 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         diffNorm = uNorm0
         avgIt = 0
         outItCnt = 1
-        MAX_PICARD_CNT = 15
-        MAX_IT_CNT = 50
+        MAX_PICARD_CNT = 30
+        MAX_IT_CNT = 60
         while diffNorm > atol:
             if outItCnt > MAX_IT_CNT:
                 print("METHOD FAILED!!! NOT CONVERGED!!!")
@@ -449,10 +449,11 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                         print(f"Picard Avg It: {avgIt:.1f}")
                         print("###########################  PICARD IT END  #############################")
                         print("#############################  NEWTON IT  ###############################")            
-            prevIt = it
+                outItCnt = 1
+                avgIt = 0  
 
         if printIt:
-            print(f"Total Avg It: {avgIt:.1f}")
+            print(f"Newton Avg It: {avgIt:.1f}")
             print("###########################  NEWTON IT END  #############################")
         if drawResult:
             import netgen.gui

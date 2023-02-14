@@ -356,7 +356,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
              drawResult:bool=False, printIt:bool=True):
     
     epsilon = 1/nu/div_penalty
-    uzawaIt = 8//int(math.log10(div_penalty))
+    uzawaIt = 12//int(math.log10(div_penalty))
     # if drawResult:
     #     import netgen.gui
     # ===================== START OF NS SOLVING ====================
@@ -426,8 +426,8 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         diffNorm = uNorm0
         avgIt = 0
         outItCnt = 1
-        MAX_PICARD_CNT = 15
-        MAX_IT_CNT = 50
+        MAX_PICARD_CNT = 30
+        MAX_IT_CNT = 60
         while diffNorm > atol:
             if outItCnt > MAX_IT_CNT:
                 print("METHOD FAILED!!! NOT CONVERGED!!!")
@@ -461,7 +461,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
 
             # ====== 3. Newton Iteration
             if not newton:
-                if diffNorm < 5e-3 or outItCnt > MAX_PICARD_CNT:
+                if diffNorm < 1e-4 or outItCnt > MAX_PICARD_CNT:
                     # Newton start
                     pseudo_timeinv = 0
                     newton = True
@@ -469,10 +469,12 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                         print(f"Picard Avg It: {avgIt:.1f}")
                         print("###########################  PICARD IT END  #############################")
                         print("#############################  NEWTON IT  ###############################")            
-            prevIt = it
+                    outItCnt = 1
+                    avgIt = 0  
+            
 
         if printIt:
-            print(f"Total Avg It: {avgIt:.1f}")
+            print(f"Newton Avg It: {avgIt:.1f}")
             print("###########################  NEWTON IT END  #############################")
         if drawResult:
             import netgen.gui
@@ -493,6 +495,6 @@ if __name__ == '__main__':
     for aNu in nuList:
         for aOrder in orderList:
             for maxLevel in [4, 5, 6, 7]:
-                nsSolver(dim=dim, iniN=1, nu=aNu, div_penalty=1e8,
+                nsSolver(dim=dim, iniN=1, nu=aNu, div_penalty=1e6,
                         order=aOrder, nMGSmooth=nSM, aspSm=nSM, maxLevel=maxLevel, 
                         pseudo_timeinv=0, rtol=1e-8, drawResult=False)

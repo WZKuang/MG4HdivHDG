@@ -284,7 +284,8 @@ class MultiGrid(BaseMatrix):
 # ============================================================ #
 def staticUzawa(aMesh, aFes, order, aA, aAPrc, 
                 aB, aPm_inv, aF, epsilon, uzawaIt, 
-                bdSol, prevSol=None, init:bool=True):
+                bdSol, prevSol=None, init:bool=True,
+                rtol:float=1e-8):
         # 4. Uzawa iteraition process for HDG static condensation,
         #    solved with preconditioned GMResSolver
         Q = L2(aMesh, order=order)
@@ -311,7 +312,7 @@ def staticUzawa(aMesh, aFes, order, aA, aAPrc,
                 # # static condensation
                 rhs.data += aA.harmonic_extension_trans * rhs
                 inv_fes = GMResSolver(aA.mat, aAPrc, printrates=False, 
-                                      tol=1e-8, atol=1e-10, maxiter=200)
+                                      tol=rtol, atol=1e-10, maxiter=500)
                 # use prev uzawa sol as initial guess
                 inv_fes.Solve(rhs=rhs, sol=solTmp0, initialize=init if it_u==0 else False)
                 it += inv_fes.iterations
