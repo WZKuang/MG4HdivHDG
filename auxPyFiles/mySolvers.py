@@ -304,7 +304,7 @@ def staticUzawa(aMesh, aFes, order, aA, aAPrc,
             #     solTmp0.data = Projector(aFes.FreeDofs(True), True) * prevSol.vec
             for it_u in range(uzawaIt):
                 if not init:
-                    solTmp0.data = Projector(aFes.FreeDofs(True), True) * prevSol.vec
+                    solTmp0.data = prevSol.vec
                 # ====== static condensation and solve
                 rhs = aF.vec.CreateVector()
                 rhs.data = aF.vec - aA.mat * bdSol.vec
@@ -314,6 +314,7 @@ def staticUzawa(aMesh, aFes, order, aA, aAPrc,
                 inv_fes = GMResSolver(aA.mat, aAPrc, printrates=False, 
                                       tol=rtol, atol=1e-10, maxiter=500)
                 # use prev uzawa sol as initial guess
+                solTmp0.data = Projector(aFes.FreeDofs(True), True) * solTmp0
                 inv_fes.Solve(rhs=rhs, sol=solTmp0, initialize=init if it_u==0 else False)
                 it += inv_fes.iterations
                 # print(inv_fes.iterations)
