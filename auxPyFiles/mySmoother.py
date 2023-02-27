@@ -81,7 +81,7 @@ def mixedHDGblockGenerator(dim:int=2, mesh=None, dirichBDs=None, iniN:int=4, bis
         result.append(fesCrFacetBlocks)
         # ==== Update of high order Hdiv-HDG
         fes.Update()
-        result.append(fes.CreateSmoothBlocks(vertex=vertexBlock, globalDofs=True)  ) 
+        result.append(fes.CreateSmoothBlocks(vertex=True, globalDofs=True)  ) 
         if dim == 3:
             result.append(fes.CreateFacetBlocks(globalDofs=True))
         else:

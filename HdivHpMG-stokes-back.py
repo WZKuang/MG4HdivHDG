@@ -222,8 +222,8 @@ def SolveBVP_CR(level, drawResult=False):
         # block smoothers, if no hacker made to ngsolve source file,
         # use the following line instead
         # blocks = VertexPatchBlocks(mesh, fes) if mesh.dim == 2 else EdgePatchBlocks(mesh, fes)
-        blocks = fes.CreateSmoothBlocks(vertex=True, globalDofs=True) if mesh.dim == 2 \
-                 else fes.CreateSmoothBlocks(vertex=False, globalDofs=True)
+        blocks = fes.CreateSmoothBlocks(vertex=True, globalDofs=True) #if mesh.dim == 2 \
+                 # else fes.CreateSmoothBlocks(vertex=False, globalDofs=True)
         
         # inv_cr = a_cr.mat.Inverse(fes_cr.FreeDofs(), inverse='sparsecholesky')
         inv_cr = MG_cr
