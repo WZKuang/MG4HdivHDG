@@ -1,6 +1,6 @@
 # exact solutions and corresponding helpers for the
 # Stokes equations and the NS equation (Kovasznay flow)
-# by Wenzheng Kuang, 11/13/2022
+
 from ngsolve import *
 
 # ================ Stokes and generalized Stokes
@@ -9,52 +9,38 @@ class stokesHelper:
     def __init__(self, dim):
         self.dim = dim
 
-    # ========== exact sol in a unit square/cube
-    def squareSolInit(self):
+        # ========== exact sol
+        # L := Grad(u) here
+        u1 = x ** 2 * (x - 1) ** 2 * 2 * y * (1 - y) * (2 * y - 1) if dim == 2 else\
+             x ** 2 * (x - 1) ** 2 * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
+        u2 = y ** 2 * (y - 1) ** 2 * 2 * x * (x - 1) * (2 * x - 1) if dim == 2 else\
+             y ** 2 * (y - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
+        u3 = -2 * z ** 2 * (z - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
+
+        du1 = CF((u1.Diff(x), u1.Diff(y))) if self.dim == 2 else CF((u1.Diff(x), u1.Diff(y), u1.Diff(z)))
+        du2 = CF((u2.Diff(x), u2.Diff(y))) if self.dim == 2 else CF((u2.Diff(x), u2.Diff(y), u2.Diff(z)))
+        du3 = CF((u3.Diff(x), u3.Diff(y), u3.Diff(z)))
+
+        d2u1 = du1[0].Diff(x)+du1[1].Diff(y) if self.dim == 2 else du1[0].Diff(x)+du1[1].Diff(y)+du1[2].Diff(z)
+        d2u2 = du2[0].Diff(x)+du2[1].Diff(y) if self.dim == 2 else du2[0].Diff(x)+du2[1].Diff(y)+du2[2].Diff(z)
+        d2u3 = du3[0].Diff(x)+du3[1].Diff(y)+du3[2].Diff(z)
         if self.dim == 2:
             # exact solution
-            u_exact1 = x ** 2 * (x - 1) ** 2 * 2 * y * (1 - y) * (2 * y - 1)
-            u_exact2 = y ** 2 * (y - 1) ** 2 * 2 * x * (x - 1) * (2 * x - 1)
-            self.u_exact = CF((u_exact1, u_exact2))
-
-            L_exactXX = (2 * x * (x - 1) ** 2 * 2 * y * (1 - y) * (2 * y - 1)
-                                    + x ** 2 * 2 * (x - 1) * 2 * y * (1 - y) * (2 * y - 1))
-            L_exactXY = (x ** 2 * (x - 1) ** 2 * 2 * (1 - y) * (2 * y - 1)
-                                    - x ** 2 * (x - 1) ** 2 * 2 * y * (2 * y - 1)
-                                    + 2 * x ** 2 * (x - 1) ** 2 * 2 * y * (1 - y))
-            L_exactYX = (y ** 2 * (y - 1) ** 2 * 2 * (x - 1) * (2 * x - 1)
-                                    + y ** 2 * (y - 1) ** 2 * 2 * x * (2 * x - 1)
-                                    + 2 * y ** 2 * (y - 1) ** 2 * 2 * x * (x - 1))
-            L_exactYY = (2 * y * (y - 1) ** 2 * 2 * x * (x - 1) * (2 * x - 1)
-                                    + y ** 2 * 2 * (y - 1) * 2 * x * (x - 1) * (2 * x - 1))
-            self.L_exact = CF((L_exactXX, L_exactXY, L_exactYX, L_exactYY), dims=(2, 2))
-
+            self.u_exact = CF((u1 , u2))
+            self.L_exact = CF((du1, du2), dims=(2, 2))
             self.p_exact = x * (1 - x) * (1 - y) - 1 / 12
+            self.source = CF((-d2u1 + self.p_exact.Diff(x),
+                              -d2u2 + self.p_exact.Diff(y)))
+
         elif self.dim == 3:
             # exact solution
-            u_exact1 = x ** 2 * (x - 1) ** 2 * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-            u_exact2 = y ** 2 * (y - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-            u_exact3 = -2 * z ** 2 * (z - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-            self.u_exact = CF((u_exact1, u_exact2, u_exact3))
-
-            L_exactXX = (2 * x * (x - 1) ** 2 * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                                    + x ** 2 * 2 * (x - 1) * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-            L_exactXY = (x ** 2 * (x - 1) ** 2 * (2 - 12 * y + 12 * y ** 2) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-            L_exactXZ = (x ** 2 * (x - 1) ** 2 * (2 - 12 * z + 12 * z ** 2) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-            L_exactYX = (y ** 2 * (y - 1) ** 2 * (2 - 12 * x + 12 * x ** 2) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-            L_exactYY = (2 * y * (y - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                                    + y ** 2 * 2 * (y - 1) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3))
-            L_exactYZ = (y ** 2 * (y - 1) ** 2 * (2 - 12 * z + 12 * z ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-            L_exactZX = (-2 * z ** 2 * (z - 1) ** 2 * (2 - 12 * x + 12 * x ** 2) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-            L_exactZY = (-2 * z ** 2 * (z - 1) ** 2 * (2 - 12 * y + 12 * y ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-            L_exactZZ = (
-                        -2 * 2 * z * (z - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-                        - 2 * z ** 2 * 2 * (z - 1) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-            self.L_exact = CF((L_exactXX, L_exactXY, L_exactXZ,
-                            L_exactYX, L_exactYY, L_exactYZ,
-                            L_exactZX, L_exactZY, L_exactZZ), dims=(3, 3))
-
+            self.u_exact = CF((u1 , u2, u3))
+            self.L_exact = CF((du1, du2, du3), dims=(3,3))
             self.p_exact = x * (1 - x) * (1 - y) * (1 - z) - 1 / 24
+            self.source = CF((-d2u1 + self.p_exact.Diff(x),
+                              -d2u2 + self.p_exact.Diff(y),
+                              -d2u3 + self.p_exact.Diff(z)))
+
     
     def getExactSol(self):
         return (self.u_exact, self.L_exact, self.p_exact)
@@ -63,33 +49,8 @@ class stokesHelper:
     # ========== rhs corresponding to the exact sol
     def getRhs(self, fes, c_low, testV):
         f = LinearForm(fes)
-        if self.dim == 2:
-            f += (-(4 * y * (1 - y) * (2 * y - 1) * ((1 - 2 * x) ** 2 - 2 * x * (1 - x))
-                            + 12 * x ** 2 * (1 - x) ** 2 * (1 - 2 * y))
-                    + (1 - 2 * x) * (1 - y)) * testV[0] * dx
-            f += (-(4 * x * (1 - x) * (1 - 2 * x) * ((1 - 2 * y) ** 2 - 2 * y * (1 - y))
-                            + 12 * y ** 2 * (1 - y) ** 2 * (2 * x - 1))
-                    - x * (1 - x)) * testV[1] * dx
-            f += c_low * self.u_exact * testV * dx
-        elif self.dim == 3:
-            f += (-((2 - 12 * x + 12 * x ** 2) * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                                + (x ** 2 - 2 * x ** 3 + x ** 4) * (-12 + 24 * y) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                                + (x ** 2 - 2 * x ** 3 + x ** 4) * (-12 + 24 * z) * (2 * y - 6 * y ** 2 + 4 * y ** 3))
-                    + (1 - 2 * x) * (1 - y) * (1 - z)
-                    ) * testV[0] * dx
-            f += (-((2 - 12 * y + 12 * y ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                            + (y ** 2 - 2 * y ** 3 + y ** 4) * (-12 + 24 * x) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
-                            + (y ** 2 - 2 * y ** 3 + y ** 4) * (-12 + 24 * z) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-                    - x * (1 - x) * (1 - z)
-                    ) * testV[1] * dx
-            f += (2 * (
-                        (2 - 12 * z + 12 * z ** 2) * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-                        + (z ** 2 - 2 * z ** 3 + z ** 4) * (-12 + 24 * x) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
-                        + (z ** 2 - 2 * z ** 3 + z ** 4) * (-12 + 24 * y) * (2 * x - 6 * x ** 2 + 4 * x ** 3))
-                    - x * (1 - x) * (1 - y)
-                    ) * testV[2] * dx
-            f += c_low * self.u_exact * testV * dx
-        
+        f += self.source * testV * dx
+        f += c_low * self.u_exact * testV * dx
         return f
 
     # ========== convergence order check with respect to the exact sol
@@ -114,50 +75,52 @@ class stokesHelper:
 
 
 class nsHelper:
-    # Kovasznay flow
-    # domain: [-0.5, 1] x [-0.5, 0.5]
+    # domain: unit square/cube
     def __init__(self, dim, nu):
         self.dim = dim
         # ========== exact sol
         # L := Grad(u) here
-        lam = 1/2/nu - sqrt(1/4/nu/nu + 4*pi*pi)
+        u1 = x ** 2 * (x - 1) ** 2 * 2 * y * (1 - y) * (2 * y - 1) if dim == 2 else\
+             x ** 2 * (x - 1) ** 2 * (2 * y - 6 * y ** 2 + 4 * y ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
+        u2 = y ** 2 * (y - 1) ** 2 * 2 * x * (x - 1) * (2 * x - 1) if dim == 2 else\
+             y ** 2 * (y - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * z - 6 * z ** 2 + 4 * z ** 3)
+        u3 = -2 * z ** 2 * (z - 1) ** 2 * (2 * x - 6 * x ** 2 + 4 * x ** 3) * (2 * y - 6 * y ** 2 + 4 * y ** 3)
+
+        du1 = CF((u1.Diff(x), u1.Diff(y))) if self.dim == 2 else CF((u1.Diff(x), u1.Diff(y), u1.Diff(z)))
+        du2 = CF((u2.Diff(x), u2.Diff(y))) if self.dim == 2 else CF((u2.Diff(x), u2.Diff(y), u2.Diff(z)))
+        du3 = CF((u3.Diff(x), u3.Diff(y), u3.Diff(z)))
+
+        d2u1 = du1[0].Diff(x)+du1[1].Diff(y) if self.dim == 2 else du1[0].Diff(x)+du1[1].Diff(y)+du1[2].Diff(z)
+        d2u2 = du2[0].Diff(x)+du2[1].Diff(y) if self.dim == 2 else du2[0].Diff(x)+du2[1].Diff(y)+du2[2].Diff(z)
+        d2u3 = du3[0].Diff(x)+du3[1].Diff(y)+du3[2].Diff(z)
         if self.dim == 2:
             # exact solution
-            u_exactX = 1 - exp(lam*x)*cos(2*pi*y)
-            u_exactY = lam/2/pi * exp(lam*x) * sin(2*pi*y)
-            self.u_exact = CF((u_exactX , u_exactY))
+            self.u_exact = CF((u1 , u2))
+            self.L_exact = CF((du1, du2), dims=(2, 2))
+            self.p_exact = x * (1 - x) * (1 - y) - 1 / 12
 
-            L_exactXX = -lam * exp(lam*x) * cos(2*pi*y)
-            L_exactXY = exp(lam*x) * 2 * pi * sin(2*pi*y)
-            L_exactYX = lam*lam/2/pi * exp(lam*x) * sin(2*pi*y)
-            L_exactYY = lam * exp(lam*x) * cos(2*pi*y)
-            self.L_exact = CF((L_exactXX, L_exactXY, L_exactYX, L_exactYY), dims=(2, 2))
+            self.source = CF((-nu*d2u1 + self.p_exact.Diff(x) + self.u_exact * du1,
+                              -nu*d2u2 + self.p_exact.Diff(y) + self.u_exact * du2))
 
-            self.p_exact = -1/2 * exp(2*lam*x)
-        
         elif self.dim == 3:
             # exact solution
-            u_exactX = 1 - exp(lam*x)*cos(2*pi*y)
-            u_exactY = lam/2/pi * exp(lam*x) * sin(2*pi*y)
-            self.u_exact = CF((u_exactX , u_exactY, 0))
+            self.u_exact = CF((u1 , u2, u3))
+            self.L_exact = CF((du1, du2, du3), dims=(3,3))
+            self.p_exact = x * (1 - x) * (1 - y) * (1 - z) - 1 / 24
 
-            L_exactXX = -lam * exp(lam*x) * cos(2*pi*y)
-            L_exactXY = exp(lam*x) * 2 * pi * sin(2*pi*y)
-            L_exactYX = lam*lam/2/pi * exp(lam*x) * sin(2*pi*y)
-            L_exactYY = lam * exp(lam*x) * cos(2*pi*y)
-            self.L_exact = CF((L_exactXX, L_exactXY, 0,
-                               L_exactYX, L_exactYY, 0,
-                               0, 0, 0), dims=(3, 3))
+            self.source = CF((-nu*d2u1 + self.p_exact.Diff(x) + self.u_exact * du1,
+                              -nu*d2u2 + self.p_exact.Diff(y) + self.u_exact * du2,
+                              -nu*d2u3 + self.p_exact.Diff(z) + self.u_exact * du3))
 
-            self.p_exact = -1/2 * exp(2*lam*x)
     
     def getExactSol(self):
         return (self.u_exact, self.L_exact, self.p_exact)
 
 
     # ========== rhs corresponding to the exact sol
-    def getRhs(self, fes):
+    def getRhs(self, fes, testV):
         f = LinearForm(fes)
+        f += self.source * testV * dx
         return f
 
     # ========== convergence order check with respect to the exact sol

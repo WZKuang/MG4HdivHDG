@@ -29,17 +29,17 @@ if dim != 2 and dim != 3:
 
 iniN = 1
 maxdofs = 5e7
-maxLevel = 6
-epsilon = 1e-4
+maxLevel = 7 if dim == 2 else 5
+epsilon = 1e-6
 uzawaIt = 2
 drawResult = False
+postProcess = True
 
 # ========== START of MESH and EXACT SOLUTION ==========
 dirichBDs = ".*"
 mesh = MakeStructured2DMesh(quads=False, nx=iniN, ny=iniN) if dim == 2 \
        else MakeStructured3DMesh(hexes=False, nx=iniN, ny=iniN, nz=iniN)
 helper = stokesHelper(dim)
-helper.squareSolInit()
 u_exact, _, _ = helper.getExactSol()
 # ========== END of MESH and EXACT SOLUTION ==========
 
@@ -269,18 +269,14 @@ def SolveBVP_CR(level, drawResult=False):
 
 
 # ========= START of CONVERGENCE ORDER CHECK ==========
-SolveBVP = SolveBVP_CR
-print(f'===== DIM: {mesh.dim}, ORDER:{ order} c_low: {c_low}, eps: {epsilon} =====')
-SolveBVP(0, drawResult)
-prev_uErr, prev_LErr = helper.ecrCheck(0, fes, mesh, uh, Lh)
-level = 1
+level = 0
+prev_uErr, prev_LErr = 0, 0
 while True:
-    # uniform refinement used, meshRate=2 in ecrCheck
-    mesh.ngmesh.Refine(); meshrate = 2
-    # if mesh.dim == 2:
-    #     mesh.ngmesh.Refine(); meshrate = 2
-    # else:
-    #     mesh.Refine(onlyonce = True); meshrate = sqrt(2)
+    if level == 0:
+        print(f'===== DIM: {mesh.dim}, ORDER:{order} c_low: {c_low}, eps: {epsilon}, post process: {postProcess} =====')
+    else:
+        # uniform refinement used, meshRate=2 in ecrCheck
+        mesh.ngmesh.Refine()
         
     # exit if total global dofs exceed a0 tol
     M.Update(); W.Update(); fes.Update()
@@ -291,8 +287,29 @@ while True:
         break
     print(f'===== LEVEL {level} =====')
     print(f'# totalDofs: {totalDofs} # global DOFS {globalDofs}')
-    SolveBVP(level, drawResult)
-    prev_uErr, prev_LErr = helper.ecrCheck(level, fes, mesh, uh, Lh, meshRate = meshrate, 
+    
+    SolveBVP_CR(level, drawResult)
+    
+    if postProcess:
+        Vs = VectorL2(mesh, order=order+1)
+        V0 = VectorL2(mesh)
+        fesX = Vs*V0
+        (us, lam), (vs, mu) = fesX.TnT()
+        astar = BilinearForm(fesX)
+        astar += (InnerProduct(Grad(us), Grad(vs))+lam*vs+mu*us)*dx
+
+        ff = LinearForm(fesX)
+        ff += (InnerProduct(Lh, Grad(vs))+uh*mu)*dx
+
+        upp = GridFunction(fesX)
+        uhstar = upp.components[0]
+        with TaskManager():
+            astar.Assemble()
+            ff.Assemble()
+            upp.vec.data = astar.mat.Inverse()*ff.vec
+
+
+    prev_uErr, prev_LErr = helper.ecrCheck(level, fes, mesh, uh if not postProcess else uhstar, Lh, meshRate = 2, 
                                            prev_uErr=prev_uErr, prev_LErr=prev_LErr)
     level += 1
 
