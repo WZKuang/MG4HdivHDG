@@ -1,14 +1,14 @@
 # mixed Hdiv-HDG for the Navier-Stokes, hp-MG preconditioned GMRES solver
 # Augmented Lagrangian Uzawa iteration for outer iteration
-# Kovasznay flow as exact solution to check convergence rate
+# Manufactured exact solution to check convergence rate
 
 from ngsolve import *
 import time as timeit
 from ngsolve.krylovspace import GMResSolver, GMRes
 # geometry
-# from ngsolve.meshes import MakeStructured2DMesh, MakeStructured3DMesh
-from netgen.geom2d import SplineGeometry
-from netgen.csg import CSGeometry, Plane, OrthoBrick, Pnt, Vec
+from ngsolve.meshes import MakeStructured2DMesh, MakeStructured3DMesh
+# from netgen.geom2d import SplineGeometry
+# from netgen.csg import CSGeometry, Plane, OrthoBrick, Pnt, Vec
 # customized functions
 from prol import meshTopology, FacetProlongationTrig2, FacetProlongationTet2
 # from auxPyFiles.mySmoother import VertexPatchBlocks, EdgePatchBlocks, FacetBlocks, SymmetricGS
@@ -18,18 +18,13 @@ from auxPyFiles.myStokesHelper import nsHelper
 import math
 
 
-dirichBDs = "rectangle"
+dirichBDs = ".*"
 bisec3D = False
-# domain: [-0.5, 1] x [-0.5, 0.5] x z
 def meshGenerator(dim:int=2, N:int=1, maxLevel:int=None, bisec3D:bool=True):
     if dim==2:
-        geo = SplineGeometry()
-        geo.AddRectangle((-0.5, -0.5),(1, 0.5),bc=dirichBDs)
-        mesh = Mesh(geo.GenerateMesh(maxh=1/N))
+        mesh = MakeStructured2DMesh(quads=False, nx=N, ny=N)
     elif dim==3:
-        geo = CSGeometry()
-        geo.Add(OrthoBrick(Pnt(-0.5, -0.5, 0),Pnt(1, 0.5, 0.5)).bc(dirichBDs))
-        mesh = Mesh(geo.GenerateMesh(maxh=1/N))
+        mesh = MakeStructured3DMesh(hexes=False, nx=N, ny=N, nz=N)
     if maxLevel is not None:
         for _ in range(maxLevel):
             if dim == 3 and bisec3D:
@@ -48,8 +43,8 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
 
     # ========== START of MESH ==========
     mesh = meshGenerator(dim, iniN)
+    nsExact = nsHelper(dim=dim, nu=nu)
     # ========== END of MESH ==========
-
     if wind is None:
         wind = CF((0, 0)) if dim == 2 else CF((0, 0, 0))
         newton = False
@@ -97,7 +92,7 @@ def OseenOperators(dim:int=2, iniN:int=4, nu:float=1e-3, wind=None,
     uhatup = IfPos(wind_h*n, tang(u), tang(uhat))    
     a += -gradv * wind_h * u * dx(bonus_intorder=order)
     a += wind_h*n * (uhatup * tang(v-vhat)) * dx(element_boundary=True, bonus_intorder=order)   
-    f = LinearForm(fes)
+    f = nsExact.getRhs(fes, v)
     # Newton adjoint for convection
     if newton:
         # uhatup_h = IfPos(wind_h*n, tang(wind_h), tang(windhat_h)) 
@@ -338,11 +333,7 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
     # if drawResult:
     #     import netgen.gui
     # ===================== START OF NS SOLVING ====================
-    nsExact = nsHelper(dim=dim, nu=nu)
     with TaskManager():
-        # ==== BD by interpolating exact solution
-        u_exact, _, _ = nsExact.getExactSol()
-
         # ====== 0. Pre-assemble needed blocks
         t0 = timeit.time()
         mesh = meshGenerator(dim, iniN)
@@ -375,11 +366,6 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
         Lh, uh, uhath = gfu.components
         gfu_bd = GridFunction(fes)
         _, uh_bd, uhath_bd = gfu_bd.components
-        # dirichlet BC
-        # uh.Set(u_exact, definedon=mesh.Boundaries(dirichBDs))
-        # uhath.Set(u_exact, definedon=mesh.Boundaries(dirichBDs))
-        uh_bd.Set(u_exact, definedon=mesh.Boundaries(dirichBDs))
-        uhath_bd.Set(u_exact, definedon=mesh.Boundaries(dirichBDs))
         # if drawResult:
         #     Draw(Norm(uh), mesh, "velNorm")
         #     input('init BDs')
@@ -465,16 +451,16 @@ def nsSolver(dim:int=2, iniN:int=4, nu:float=1e-3, div_penalty:float=1e6,
                 
 
 if __name__ == '__main__':
-    dim = 2
-    nSM = 1 if dim==2 else 2
-    levels = 7 if dim==2 else 4
+    dim = 3
+    nSM = 2
+    levels = 7 if dim==2 else 5
     meshRate = sqrt(2) if bisec3D and dim==3 else 2
-    # nuList = [1e-2, 1e-3, 5e-4]
-    nuList = [1, 1e-1, 1e-2, 1e-3]
+    nuList = [1, 1e-3]
     orderList = [0, 1, 2, 3]
     for aNu in nuList:
         for aOrder in orderList:
             nsExact = nsHelper(dim, aNu)
+            u_exact, _, _ = nsExact.getExactSol()
             L2_uErr, L2_graduErr = 0, 0
             for level in range(levels):
                 mesh, uh, Lh = nsSolver(dim, iniN=1, nu=aNu, div_penalty=1e6,
@@ -483,13 +469,38 @@ if __name__ == '__main__':
                                         printIt=False, drawResult=False)
                 L2_uErr, L2_graduErr = nsExact.ecrCheck(level, mesh, uh, Lh, meshRate,
                                                     prev_LErr=L2_graduErr, prev_uErr=L2_uErr)
-            vtk = VTKOutput(ma=mesh,
-                            coefs=[uh],
-                            names = ["velocity"],
-                            filename="result",
-                            subdivision=3)
-            # Exporting the results:
-            vtk.Do()
+
+                # post processing
+                Vs = VectorL2(mesh, order=aOrder+1)
+                V0 = VectorL2(mesh)
+                fesX = Vs*V0
+                (us, lam), (vs, mu) = fesX.TnT()
+                astar = BilinearForm(fesX)
+                astar += (InnerProduct(Grad(us), Grad(vs))+lam*vs+mu*us)*dx
+
+                ff = LinearForm(fesX)
+                ff += (InnerProduct(Lh, Grad(vs))+uh*mu)*dx
+
+                upp = GridFunction(fesX)
+                uhstar = upp.components[0]
+                with TaskManager():
+                    astar.Assemble()
+                    ff.Assemble()
+                    upp.vec.data = astar.mat.Inverse()*ff.vec
+                    L2_ustartErr = sqrt(Integrate((u_exact-uhstar)**2, mesh))
+                if level == 0:
+                    print(f'uhstart L2-error: {L2_ustartErr:.1E}')
+                else:
+                    print(f'uhstart L2-error: {L2_ustartErr:.1E},'
+                          f'uhstart conv rate: {log(prev_ustartErr / L2_ustartErr) / log(meshRate):.1E}')
+                prev_ustartErr = L2_ustartErr
+            # vtk = VTKOutput(ma=mesh,
+            #                 coefs=[uhstar],
+            #                 names = ["velocity"],
+            #                 filename="result",
+            #                 subdivision=3)
+            # # Exporting the results:
+            # vtk.Do()
             print("============================================")
             print("============================================")
 
