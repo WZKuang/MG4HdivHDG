@@ -1,24 +1,19 @@
-# hp-MG methods for the H(div)-HDG for the incompressible flow problems
-Paper link: TO BE FILLED.
+# MG4HdivHDG
 
-A proceeding work of our previous study on [optimal geometric h-MG for HDG-P0 for the reaction-diffusion and the generalized Stokes equations](https://arxiv.org/abs/2208.14418).
+Source code for numerical experiments in the paper "hp-Multigrid preconditioner for a divergence-conforming HDG scheme for the incompressible flow problems".
 
-Augmented Lagrangian (AL) Uzawa iteration method is used to solve the mixed H(div)-HDG scheme for the generalized Stokes and NS equations.
+Paper link: [ResearchGate](https://www.researchgate.net/publication/369182613_hp-Multigrid_preconditioner_for_a_divergence-conforming_HDG_scheme_for_the_incompressible_flow_problems).
 
-We firsly proved the equivalence between the lowest-order mixed H(div)-HDG scheme and the well-established Crouzeix-Raviart elements for the generalized Stokes equations. Then we naturally proposed a geometric *h*-MG method robust to the mesh size *h* and AL parameter *lambda* of the lowest-order scheme for the generalized Stokes equations, basded on the Ph.D. thesis of Joachim Schöberl (1999).
-Then the geometric h-MG of the lowest-order scheme is used as the coarse solver in a multiplicative p-MG of the higher-order H(div)-HDG scheme for the generalized Stokes equations, with robustness with respect to polynomial order demonstrated in the numerical experiments.
+A proceeding work of our previous study on [optimal geometric multigrid for HDG-P0 for the reaction-diffusion and the generalized Stokes equations](https://arxiv.org/abs/2208.14418).
 
-The developed hp-MG method for the generalized Stokes equatsions is then extended to the NS equations with an upwind convection term, and numerical experiments are performed.
+Augmented Lagrangian (AL) Uzawa iteration method is used to solve the condensed H(div)-HDG scheme for the generalized Stokes and the Navier-Stokes equations.
 
-## Some Hackers to NGSolve Source Files:
-<!-- 1. Make the public parameter "print" of class "FESpace" usable in Python coding.
-```C++
-/// /comp/fespace.hpp, line 400
-docu.Arg("print") = "bool = False\n"
-      "  Write additional information to testout file. \n"
-      "  This file must be set by ngsolve.SetTestoutFile. Use \n"
-      "  ngsolve.SetNumThreads(1) for serial output";
-``` -->
+We firsly proved the equivalence between the condensed lowest-order H(div)-HDG scheme and a Crouzeix-Raviart element discretzation with a pressure-robust treatment for the generalized Stokes equations. Then we naturally proposed a geometric *h*-MG method robust to the mesh size *h* and AL parameter *lambda* of the lowest-order scheme for the generalized Stokes equations, basded on the Ph.D. thesis of J. Schöberl (1999).
+Then the geometric h-MG of the lowest-order scheme is used as the auxiliary space solver in a multiplicative auxiliary space preconditioner of the condensed higher-order H(div)-HDG scheme for the generalized Stokes equations, with insensitivity with respect to polynomial order increase as demonstrated in our numerical experiments.
+
+The developed hp-MG method for the generalized Stokes equatsions is then tested on the condensed H(div)-HDG scheme for the linearized Navier-Stokes equations with Picard/Newton method, and the iteration counts of the preconditioned GMRes solver grows mildly with the rise in Reynolds number up to 10^3.
+
+## Some hackers to NGSolve source files to accelerate block relaxation/smoothing methods:
 
 1. Added Python interface to the public method of class "FESpace", to get edge/vertex-patched blocks of global/local DOFs of FESpaces in Python to accelerate constructing block GS smoothers.
 ```C++
@@ -51,7 +46,7 @@ docu.Arg("print") = "bool = False\n"
     "Create vertex/edge-patched blocks of global/local DOFs")
 ```
 
-2. Added to class "FESpace" a public method "CreateFacetBlocks" and its Python interface, to get facet blocks of global/local DOFs of FESpaces in Python to accelerate mass matrix inverse in 3D cases.
+1. Added to class "FESpace" a public method "CreateFacetBlocks" and its Python interface, to get facet blocks of global/local DOFs of FESpaces in Python to accelerate mass matrix inverse in 3D cases.
 ```C++
 /// /comp/python_comp.cpp, line 839
 .def("CreateFacetBlocks", 
@@ -145,41 +140,4 @@ void NonconformingFESpace :: GetFaceDofNrs (int fanr, Array<DofId> & dnums) cons
       }
   }
 ```
-
-<!-- ## Some Hackers to NGSolve Library Files:
-
-1. In ngsolve.krylovspace (krylovspace.py), add option "static" to the class "LinearSolver". When static condensation is used, the rhs has been minused by "a.mat * bdData" before the linear solver, and this could cause problem when static condensation and non-zero initial guess is used. Corresponding changes have also been made to "CGSolver", "MinResSolver" and "GMResSolver".
-```Python
-# Line 59, LinearSolver
-def __init__(self, mat : BaseMatrix,
-                 pre : Optional[Preconditioner] = None,
-                 freedofs : Optional[BitArray] = None,
-                 tol : float = None,
-                 maxiter : int = 100,
-                 atol : float = None,
-                 callback : Optional[Callable[[int, float], None]] = None,
-                 callback_sol : Optional[Callable[[BaseVector], None]] = None,
-                 printrates : bool = False, 
-                 static : bool = False):
-
-# line 74
-self.static = static
-
-# line 183, CGSolver
-d.data = rhs.data if self.static else rhs - self.mat * sol
-
-# line 484, MinResSolver
-v.data = rhs.data if self.static else rhs - mat * u
-
-# line 746, GMResSolver
-tmp.data = rhs.data if self.static else rhs - A * sol
-
-``` -->
-
-
-<!-- 2. In ngsolve.krylovspace (krylovspace.py), change the return value of the function "GMRes" s.t. the iteration count is returned.
-```Python
-# Line 891
-return solver.Solve(rhs=b, sol=x), solver.iterations
-``` -->
 
