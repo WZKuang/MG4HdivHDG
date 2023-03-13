@@ -11,16 +11,16 @@ Then the geometric h-MG of the lowest-order scheme is used as the coarse solver 
 The developed hp-MG method for the generalized Stokes equatsions is then extended to the NS equations with an upwind convection term, and numerical experiments are performed.
 
 ## Some Hackers to NGSolve Source Files:
-1. Make the public parameter "print" of class "FESpace" usable in Python coding.
+<!-- 1. Make the public parameter "print" of class "FESpace" usable in Python coding.
 ```C++
 /// /comp/fespace.hpp, line 400
 docu.Arg("print") = "bool = False\n"
       "  Write additional information to testout file. \n"
       "  This file must be set by ngsolve.SetTestoutFile. Use \n"
       "  ngsolve.SetNumThreads(1) for serial output";
-```
+``` -->
 
-2. Added Python interface to the public method of class "FESpace", to get edge/vertex-patched blocks of global/local DOFs of FESpaces in Python to accelerate constructing block GS smoothers.
+1. Added Python interface to the public method of class "FESpace", to get edge/vertex-patched blocks of global/local DOFs of FESpaces in Python to accelerate constructing block GS smoothers.
 ```C++
 /// /comp/python_comp.cpp, line 811
 .def("CreateSmoothBlocks", 
@@ -51,7 +51,7 @@ docu.Arg("print") = "bool = False\n"
     "Create vertex/edge-patched blocks of global/local DOFs")
 ```
 
-3. Added to class "FESpace" a public method "CreateFacetBlocks" and its Python interface, to get facet blocks of global/local DOFs of FESpaces in Python to accelerate mass matrix inverse in 3D cases.
+2. Added to class "FESpace" a public method "CreateFacetBlocks" and its Python interface, to get facet blocks of global/local DOFs of FESpaces in Python to accelerate mass matrix inverse in 3D cases.
 ```C++
 /// /comp/python_comp.cpp, line 839
 .def("CreateFacetBlocks", 
@@ -106,7 +106,7 @@ shared_ptr<Table<int>> FESpace :: CreateFacetBlocks (const bool globalDofs) cons
   }
 ```
 
-4. Overload the virtual public methods "GetEdgeDofNrs" and "GetFaceDofNrs" of the child class "NonconformingFESpace" from the base class "FESpace", to get usable smoothing bloks of Crouzeix-Raviart spaces.
+3. Overload the virtual public methods "GetEdgeDofNrs" and "GetFaceDofNrs" of the child class "NonconformingFESpace" from the base class "FESpace", to get usable smoothing bloks of Crouzeix-Raviart spaces.
 ```C++
 /// /comp/fespace.hpp, line 1070
 virtual void GetEdgeDofNrs (int ednr, Array<DofId> & dnums) const override;
